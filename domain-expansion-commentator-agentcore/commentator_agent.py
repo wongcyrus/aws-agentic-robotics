@@ -28,7 +28,7 @@ class EndpointFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 # Env Variables
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "moonshotai.kimi-k2.5")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION", "us-east-1")
 
 # Helper to load system prompts
@@ -140,8 +140,7 @@ async def invoke_agent(request: Request):
         system_prompt = load_system_prompt()
         model = BedrockModel(
             model_id=BEDROCK_MODEL_ID,
-            region_name=AWS_BEDROCK_REGION,
-            temperature=0.8
+            region_name=AWS_BEDROCK_REGION
         )
         agent = Agent(
             model=model,

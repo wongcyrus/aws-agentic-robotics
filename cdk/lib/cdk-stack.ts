@@ -31,7 +31,7 @@ function normalizeContextList(value: unknown): string[] {
   return [];
 }
 
-export class AmazonNovaRoboticCdkStack extends cdk.Stack {
+export class AwsAgenticRoboticsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 

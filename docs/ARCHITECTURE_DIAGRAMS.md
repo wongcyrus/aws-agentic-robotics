@@ -104,5 +104,5 @@ A comparison of the two security mechanisms used in the cloud.
 | Component | Protocol | Security Mechanism | Responsibility |
 | :--- | :--- | :--- | :--- |
 | **Commentary API** | HTTPS (POST) | **Cognito Native Authorizer** | API Gateway automatically rejects unauthorized requests. |
-| **Signaling Channel** | WSS (WebSocket) | **Custom Lambda Authorizer** | Manual JWT signature verification in [auth.py](file:///home/developer/Documents/data-disk/amazon-nova-robotics/domain-expansion-ar-game-serverless/backend/auth.py). |
+| **Signaling Channel** | WSS (WebSocket) | **Custom Lambda Authorizer** | Manual JWT signature verification in [auth.py](../domain-expansion-ar-game-serverless/backend/auth.py). |
 | **Media Assets** | HTTPS (GET) | **Public / IAM** | Snapshots are public for `<img>` tags; S3 assets protected by IAM. |

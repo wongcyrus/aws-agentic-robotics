@@ -94,7 +94,7 @@ function loadDigitalHumanToolSchema(): RobotToolSchemaDefinition[] {
 function materializeRobotToolSchemaAsset(): string {
   const assetPath = path.join(
     os.tmpdir(),
-    "amazon-nova-robotics-robot-tool-schema.json"
+    "aws-agentic-robotics-robot-tool-schema.json"
   );
   fs.writeFileSync(assetPath, JSON.stringify(loadRobotToolSchema(), null, 2));
   return assetPath;
@@ -103,7 +103,7 @@ function materializeRobotToolSchemaAsset(): string {
 function materializeDigitalHumanToolSchemaAsset(): string {
   const assetPath = path.join(
     os.tmpdir(),
-    "amazon-nova-robotics-digital-human-tool-schema.json"
+    "aws-agentic-robotics-digital-human-tool-schema.json"
   );
   fs.writeFileSync(assetPath, JSON.stringify(loadDigitalHumanToolSchema(), null, 2));
   return assetPath;

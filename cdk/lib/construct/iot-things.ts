@@ -141,7 +141,7 @@ export class BatchIoTThings extends Construct {
           "./function/batch-iot-custom-resources/batch-iot-handler.ts"
         ),
         handler: "handler",
-        runtime: lambda.Runtime.NODEJS_20_X,
+        runtime: lambda.Runtime.NODEJS_24_X,
         timeout: cdk.Duration.minutes(15), // Longer timeout for batch operations
         role: lambdaRole,
         logGroup: logGroup,

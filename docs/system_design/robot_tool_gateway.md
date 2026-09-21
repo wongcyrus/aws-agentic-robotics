@@ -28,7 +28,7 @@ To prevent interference between critical physical robot actuators and multi-moda
 | **Gateway Target Name** | `robot-only-mcp-lambda` | `digital-human-mcp-lambda` |
 | **Backend Lambda** | `RobotToolFunction` | `DigitalHumanToolFunction` |
 | **Code Entrypoint** | `mcp_server/robot_tool_lambda.py` | `mcp_server/digital_human_tool_lambda.py` |
-| **Tool Schema Asset** | `amazon-nova-robotics-robot-tool-schema.json` | `amazon-nova-robotics-digital-human-tool-schema.json` |
+| **Tool Schema Asset** | `aws-agentic-robotics-robot-tool-schema.json` | `aws-agentic-robotics-digital-human-tool-schema.json` |
 | **Supported Actions (API)**| **Robot Motion Control (31 Actions)**:<br> - Go forward, backup, strafe, stand, squat, bow, push-ups, kick, turn, wave (`robot_wave`), and camera capture (`robot_see`, `get_image`). | **Presenter Controls**:<br> - Digital human vocalization (`digital_human_speech`). |
 | **Environment Keys** | `SIMULATOR_ENDPOINT`, `IMAGE_BUCKET_NAME` | `SIMULATOR_ENDPOINT`, `IMAGE_BUCKET_NAME`, `SpeechTable` |
 | **S3 Bucket Access** | Read-Write (Stores capture frames) | Read-Only |

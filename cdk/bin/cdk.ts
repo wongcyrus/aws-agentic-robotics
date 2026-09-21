@@ -2,7 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as fs from 'fs';
 import * as path from 'path';
-import { AmazonNovaRoboticCdkStack } from '../lib/cdk-stack';
+import { AwsAgenticRoboticsStack } from '../lib/cdk-stack';
 
 // Load .env file from the cdk folder manually
 try {
@@ -27,7 +27,8 @@ try {
 }
 
 const app = new cdk.App();
-new AmazonNovaRoboticCdkStack(app, 'CdkStack', {
+new AwsAgenticRoboticsStack(app, 'AwsAgenticRobotics', {
+  stackName: 'aws-agentic-robotics',
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
    * but a single synthesized template can be deployed anywhere. */

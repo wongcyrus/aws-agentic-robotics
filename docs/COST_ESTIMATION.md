@@ -1,6 +1,6 @@
 # AWS Cost Estimation & Optimization Guide
 
-This guide provides a comprehensive cost estimation for the Amazon Nova Robotics platform based on the latest official AWS pricing metrics. It covers the serverless application layers and the specialized **Amazon Bedrock AgentCore** container runtimes.
+This guide provides a comprehensive cost estimation for the AWS Agentic Robotics platform based on the latest official AWS pricing metrics. It covers the serverless application layers and the specialized **Amazon Bedrock AgentCore** container runtimes.
 
 ---
 

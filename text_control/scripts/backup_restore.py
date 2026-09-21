@@ -12,7 +12,8 @@ import sys
 import boto3
 from botocore.exceptions import ClientError
 
-DEFAULT_TABLE = "CdkStack-DatabaseConstructRobotTable136C3167-KHOOWUU90HVP"
+from cdk_outputs import get_stack_output
+
 DEFAULT_FILE = "robot_table_backup.json"
 
 
@@ -134,8 +135,7 @@ Examples:
     )
     parser.add_argument(
         "--table",
-        default=DEFAULT_TABLE,
-        help=f"Target DynamoDB table name (default: {DEFAULT_TABLE})"
+        help="Target DynamoDB table name (default: RobotTable from cdk/output.json)"
     )
     parser.add_argument(
         "--file",
@@ -145,10 +145,12 @@ Examples:
 
     args = parser.parse_args()
 
+    table_name = args.table or get_stack_output("RobotTable")
+
     if args.action == "backup":
-        success = backup_table(args.table, args.file)
+        success = backup_table(table_name, args.file)
     else:
-        success = restore_table(args.table, args.file)
+        success = restore_table(table_name, args.file)
 
     sys.exit(0 if success else 1)
 

@@ -43,8 +43,9 @@ python test_streaming.py continuity # Conversation continuity
 ### Prerequisites
 
 1. **Start the application server:**
+   From the repository root:
    ```bash
-   cd /home/developer/Documents/amazon-nova-robotics/text_control
+   cd text_control
    python app.py
    ```
 

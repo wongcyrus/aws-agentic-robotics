@@ -1,8 +1,8 @@
-# Amazon Nova Robotics & Multimodal System: Overall Architecture Specification (Overview)
+# AWS Agentic Robotics & Multimodal System: Overall Architecture Specification (Overview)
 
-![Amazon Nova Robotics Overall Architecture Topology (AWS Style)](./img/overall_architecture_topology_aws.png)
+![AWS Agentic Robotics Overall Architecture Topology (AWS Style)](./img/overall_architecture_topology_aws.png)
 
-This document provides a birds-eye overview of the `amazon-nova-robotics` architecture, establishing a global perspective on technical structures and security models. This system seamlessly integrates Large Language Models (LLM), Amazon Nova smart robots, Xiaoice digital human presenters, secure remote SSM execution channels, and leverages the AWS Bedrock AgentCore Secure Gateway as its unified security boundary.
+This document provides a birds-eye overview of the `amazon-agent-robotics` architecture, establishing a global perspective on technical structures and security models. This system seamlessly integrates Large Language Models (LLM), Amazon Nova smart robots, Xiaoice digital human presenters, secure remote SSM execution channels, and leverages the AWS Bedrock AgentCore Secure Gateway as its unified security boundary.
 
 ---
 

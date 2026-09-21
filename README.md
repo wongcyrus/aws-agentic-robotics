@@ -1,4 +1,4 @@
-# Amazon Nova Robotics
+# AWS Agentic Robotics
 
 A comprehensive voice-controlled robotics platform powered by AWS IoT, AWS Bedrock, and Amazon Nova. This project enables natural language control of humanoid robots and digital-human presenters through voice and text interfaces, with real-time 3D visualization, simulation capabilities, and secure authentication.
 
@@ -8,7 +8,7 @@ See the consolidated documentation index in [docs/README.md](docs/README.md), re
 
 ## 🎯 Project Overview
 
-Amazon Nova Robotics is a multi-component system that combines:
+AWS Agentic Robotics is a multi-component system that combines:
 
 - **Voice Control**: Real-time speech-to-speech interaction using Amazon Nova Sonic
 - **Robot & Presenter Control**: Physical humanoid robots and Xiaoice digital humans via AWS IoT and AgentCore gateway tools
@@ -186,16 +186,21 @@ This script will:
 3. **Destroy Stacks** (when needed):
 
 ```bash
-cdk destroy --require-approval never
+cd cdk
+npx cdk destroy AwsAgenticRobotics --require-approval never
 ```
+
+`AwsAgenticRobotics` is the CDK app selector; CloudFormation displays the physical stack name `aws-agentic-robotics`.
 
 ### Local Development Setup
 
 #### Load Environment Variables
 
+From the repository root:
+
 ```bash
 sudo apt update && sudo apt install -y jq
-source /workspaces/amazon-nova-robotics/load_cdkstack_env.sh
+source ./load_cdkstack_env.sh
 ```
 
 #### Download AWS IoT Certificates

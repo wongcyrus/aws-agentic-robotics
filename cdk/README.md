@@ -1,14 +1,17 @@
 # CDK Infrastructure
 
-This CDK app provisions the AWS infrastructure for the Amazon Nova Robotics project, including the **speech AgentCore runtime**, the **dual-target AgentCore gateway** for humanoid and digital-human tools, static websites, Cognito, and supporting data stores.
+This CDK app provisions the AWS infrastructure for the AWS Agentic Robotics project, including the **speech AgentCore runtime**, the **dual-target AgentCore gateway** for humanoid and digital-human tools, static websites, Cognito, and supporting data stores.
 
 ## Useful commands
 
 - `npm run build` — compile TypeScript
 - `npm run test` — run unit tests
-- `npx cdk synth` — synthesize CloudFormation
-- `npx cdk diff` — compare local changes with the deployed stack
-- `npx cdk deploy` — deploy the stack
+- `npx cdk synth AwsAgenticRobotics` — synthesize CloudFormation
+- `npx cdk diff AwsAgenticRobotics` — compare local changes with the deployed stack
+- `npx cdk deploy AwsAgenticRobotics` — deploy the `aws-agentic-robotics` stack
+- `npx cdk destroy AwsAgenticRobotics` — destroy the `aws-agentic-robotics` stack
+
+`AwsAgenticRobotics` is the CDK app selector. The physical CloudFormation stack name is `aws-agentic-robotics`.
 
 ## Current speech + gateway deployment shape
 

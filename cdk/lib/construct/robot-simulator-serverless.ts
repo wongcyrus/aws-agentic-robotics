@@ -252,7 +252,7 @@ export class RobotSimulatorServerlessConstruct extends Construct {
     distribution.addBehavior("/ws", wsOrigin, wsBehavior);
 
     // 7. Auto-deploy and cache-invalidate Static S3 Frontend assets (excluding large video assets)
-    new s3deploy.BucketDeployment(this, "DeployWebsite", {
+    const websiteDeployment = new s3deploy.BucketDeployment(this, "DeployWebsite", {
       sources: [
         s3deploy.Source.asset(path.join(__dirname, "../../../humanoid-robot-simulator-serverless/frontend"), {
           exclude: ["video/*"],
@@ -269,6 +269,15 @@ export class RobotSimulatorServerlessConstruct extends Construct {
       distributionPaths: ["/*"],
       prune: false,
     });
+    websiteDeployment.handlerRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+        ],
+        resources: [distribution.distributionArn],
+      })
+    );
 
     this.serviceUrl = distribution.distributionDomainName;
     this.webSocketUrl = `wss://${webSocketApi.ref}.execute-api.${Stack.of(this).region}.amazonaws.com/${stage.stageName}`;

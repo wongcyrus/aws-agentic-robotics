@@ -19,7 +19,7 @@
     },
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/workspaces/amazon-nova-robotic/robot_client/humanoid/venv/bin/python",
+        "python.defaultInterpreterPath": "${workspaceFolder}/robot_client/humanoid/venv/bin/python",
         "python.linting.enabled": true,
         "python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
         "python.linting.flake8Enabled": true,
@@ -30,7 +30,7 @@
         "python.testing.unittestEnabled": false,
         "python.testing.pytestEnabled": true,
         "python.analysis.extraPaths": [
-          "./amazon-nova-robotic/robot_client"
+          "${workspaceFolder}/robot_client"
         ],
         "pylint.importStrategy": "useBundled",
         "[python]": {

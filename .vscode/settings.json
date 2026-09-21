@@ -1,5 +1,5 @@
 {
-  "python.defaultInterpreterPath": "/workspaces/amazon-nova-robotics/text_control/.venv/bin/python",
+  "python.defaultInterpreterPath": "${workspaceFolder}/text_control/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
   "flake8.args": [
     "--max-line-length=120"

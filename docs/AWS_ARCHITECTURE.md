@@ -1,6 +1,6 @@
 # AWS Cloud System Architecture & Design Specification
 
-This document provides a unified, comprehensive overview of the AWS cloud architecture powering the **Amazon Nova Robotics** ecosystem. The platform combines real-time humanoid voice control, text-based robot control, MCP-driven device tooling, and the gesture-controlled **Domain Expansion AR Game** on a primarily serverless AWS foundation.
+This document provides a unified, comprehensive overview of the AWS cloud architecture powering the **AWS Agentic Robotics** ecosystem. The platform combines real-time humanoid voice control, text-based robot control, MCP-driven device tooling, and the gesture-controlled **Domain Expansion AR Game** on a primarily serverless AWS foundation.
 
 ---
 
@@ -281,5 +281,5 @@ To deliver a secure game that perfectly integrates with native browser media ele
   * **Cost-Saving Session Guards**: The frontend leverages a `setInterval` loop to verify the lifespan of the Cognito JWT token locally. Upon expiration, the frontend forces an immediate `.close()` event on the WebSocket, ensuring idle clients do not continuously drain API Gateway or AgentCore runtime billing meters.
 
 ### 3. Consolidated `"mcpserver"` Default Session Key
-* **Standardization**: Both frontend elements ([battle.js](file:///home/developer/Documents/data-disk/amazon-nova-robotics/domain-expansion-ar-game/static/js/battle.js), [hand_tracker.js](file:///home/developer/Documents/data-disk/amazon-nova-robotics/domain-expansion-ar-game/static/js/hand_tracker.js)) and cloud backend components ([lambda_function.py](file:///home/developer/Documents/data-disk/amazon-nova-robotics/domain-expansion-ar-game-serverless/backend/lambda_function.py), [image_processor.py](file:///home/developer/Documents/data-disk/amazon-nova-robotics/domain-expansion-ar-game-serverless/backend/image_processor.py), [commentary.py](file:///home/developer/Documents/data-disk/amazon-nova-robotics/domain-expansion-ar-game-serverless/backend/commentary.py)) default to a standard `"mcpserver"` session ID.
+* **Standardization**: Both frontend elements ([battle.js](../domain-expansion-ar-game/static/js/battle.js), [hand_tracker.js](../domain-expansion-ar-game/static/js/hand_tracker.js)) and cloud backend components ([lambda_function.py](../domain-expansion-ar-game-serverless/backend/lambda_function.py), [image_processor.py](../domain-expansion-ar-game-serverless/backend/image_processor.py), [commentary.py](../domain-expansion-ar-game-serverless/backend/commentary.py)) default to a standard `"mcpserver"` session ID.
 * This ensures that any battles fought, snapshots captured, or commentaries generated are seamlessly integrated and accessible by your conversational agents.

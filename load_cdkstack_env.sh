@@ -1,5 +1,5 @@
 #!/bin/bash
-# Load CdkStack dict from output.json into environment variables
+# Load the single CDK stack's outputs into environment variables
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 json_file="$script_dir/cdk/output.json"
@@ -9,7 +9,13 @@ if ! command -v jq &> /dev/null; then
   exit 1
 fi
 
-export_cmds=$(jq -r '.CdkStack | to_entries[] | "export " + .key + "=\"" + (.value|tostring) + "\"" ' "$json_file")
+stack_count=$(jq 'length' "$json_file")
+if [ "$stack_count" -ne 1 ]; then
+  echo "Error: expected exactly one stack in $json_file, found $stack_count."
+  exit 1
+fi
+
+export_cmds=$(jq -r 'to_entries[0].value | to_entries[] | "export " + .key + "=\"" + (.value|tostring) + "\""' "$json_file")
 
 eval "$export_cmds"
-echo "CdkStack environment variables loaded."
+echo "CDK stack environment variables loaded."

@@ -1,14 +1,17 @@
 # Lambda Function URL Authorization Model Update
 
+> [!NOTE]
+> This is a historical migration record. The current AWS Agentic Robotics architecture uses the AgentCore gateway implemented in `cdk/lib/construct/robot-tool-gateway.ts`; it no longer deploys the legacy Lambda MCP function URL described below.
+
 ## Overview
 
 AWS Lambda has updated the authorization model for function URLs to improve security. Function URLs now require **both** `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` actions in permission policies.
 
 ## Changes Made
 
-### Updated File
+### Historical File
 
-- **`/workspaces/amazon-nova-robotics/cdk/lib/construct/mcp-server.ts`**
+- `cdk/lib/construct/mcp-server.ts` (removed during the AgentCore gateway migration)
 
 ### What Changed
 
@@ -75,9 +78,11 @@ Both components will now have the proper permissions to invoke the MCP server fu
 
 To apply these changes:
 
+From the repository root:
+
 ```bash
 # Navigate to CDK directory
-cd /workspaces/amazon-nova-robotics/cdk
+cd cdk
 
 # Install dependencies (if needed)
 npm install
@@ -85,22 +90,21 @@ npm install
 # Build the TypeScript code
 npm run build
 
-# Deploy the updated stack
-cdk deploy
+# Deploy the current stack
+npx cdk deploy AwsAgenticRobotics
 ```
 
 Or use the deployment script from the root:
 
 ```bash
-cd /workspaces/amazon-nova-robotics
 ./deploy.sh
 ```
 
 ## Timeline
 
 - **AWS Deadline**: November 1, 2026
-- **Update Status**: ✅ COMPLETED
-- **Action Required**: Deploy the updated CDK stack before the deadline
+- **Update Status**: Completed in the legacy implementation; superseded by AgentCore gateway migration
+- **Action Required**: None for the current architecture
 
 ## Testing
 

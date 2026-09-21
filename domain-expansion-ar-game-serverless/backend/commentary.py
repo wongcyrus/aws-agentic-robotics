@@ -12,7 +12,7 @@ DEFAULT_AGENT_TYPE = os.environ.get("AGENT_TYPE", "agentcore_runtime")
 OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
 OPENCLAW_AGENT_ID = os.environ.get("OPENCLAW_AGENT_ID", "domain-commentator")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "moonshotai.kimi-k2.5")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
 AGENTCORE_RUNTIME_ARN = os.environ.get("AGENTCORE_RUNTIME_ARN", "")
 OPENCLAW_RUNTIME_ARN = os.environ.get("OPENCLAW_RUNTIME_ARN", "")
@@ -249,10 +249,16 @@ def direct_bedrock_fallback(
             modelId=BEDROCK_MODEL_ID,
             messages=messages,
             system=[{"text": system_prompt}],
-            inferenceConfig={"temperature": 0.8, "maxTokens": 200},
+            inferenceConfig={"maxTokens": 200},
         )
 
-        commentary = response["output"]["message"]["content"][0]["text"]
+        content = response["output"]["message"]["content"]
+        commentary = next(
+            (block["text"] for block in content if isinstance(block.get("text"), str)),
+            None,
+        )
+        if not commentary:
+            raise ValueError("Bedrock response did not contain a text block")
         logger.info(f"Direct Bedrock commentary generated successfully: {commentary}")
         return commentary
     except Exception as e:
@@ -337,7 +343,7 @@ def generate_ai_commentary(
 
             system_prompt = load_system_prompt(language=language)
             model = BedrockModel(
-                model_id=BEDROCK_MODEL_ID, region_name=BEDROCK_REGION, temperature=0.8
+                model_id=BEDROCK_MODEL_ID, region_name=BEDROCK_REGION
             )
             agent = Agent(model=model, system_prompt=system_prompt)
 

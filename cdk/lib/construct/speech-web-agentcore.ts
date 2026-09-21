@@ -177,20 +177,35 @@ export class SpeechControlAgentcoreConstruct extends Construct {
     this.serviceUrl = distribution.distributionDomainName;
 
     // 8. Deploy static web files and dynamic config.json to website bucket
-    new s3deploy.BucketDeployment(this, "DeploySpeechWebsiteAndConfig", {
-      sources: [
-        s3deploy.Source.asset(path.join(__dirname, "../../../speech_control_agentcore/frontend")),
-        s3deploy.Source.jsonData("config.json", {
-          region: Stack.of(this).region,
-          userPoolId: props.userPoolId,
-          clientId: props.userPoolClientId,
-          identityPoolId: props.identityPoolId,
-          runtimeArn: runtime.agentRuntimeArn,
-        }),
-      ],
-      destinationBucket: websiteBucket,
-      distribution,
-      distributionPaths: ["/*"],
-    });
+    const speechWebsiteDeployment = new s3deploy.BucketDeployment(
+      this,
+      "DeploySpeechWebsiteAndConfig",
+      {
+        sources: [
+          s3deploy.Source.asset(
+            path.join(__dirname, "../../../speech_control_agentcore/frontend")
+          ),
+          s3deploy.Source.jsonData("config.json", {
+            region: Stack.of(this).region,
+            userPoolId: props.userPoolId,
+            clientId: props.userPoolClientId,
+            identityPoolId: props.identityPoolId,
+            runtimeArn: runtime.agentRuntimeArn,
+          }),
+        ],
+        destinationBucket: websiteBucket,
+        distribution,
+        distributionPaths: ["/*"],
+      }
+    );
+    speechWebsiteDeployment.handlerRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+        ],
+        resources: [distribution.distributionArn],
+      })
+    );
   }
 }

@@ -3,7 +3,7 @@ import json
 import os
 import boto3
 
-TABLE_NAME = "CdkStack-DatabaseConstructRobotTable136C3167-KHOOWUU90HVP"
+from cdk_outputs import PROJECT_ROOT, get_stack_output
 
 def load_subscription_key():
     # Try reading from environment
@@ -13,10 +13,8 @@ def load_subscription_key():
     
     # Try reading from cdk/.env
     possible_paths = [
-        "/home/developer/Documents/data-disk/amazon-nova-robotics/cdk/.env",
-        os.path.join(os.path.dirname(__file__), "../../cdk/.env"),
-        os.path.join(os.path.dirname(__file__), "../cdk/.env"),
-        "cdk/.env"
+        PROJECT_ROOT / "cdk" / ".env",
+        "cdk/.env",
     ]
     for p in possible_paths:
         if os.path.exists(p):
@@ -27,6 +25,7 @@ def load_subscription_key():
     return None
 
 def sync_postures():
+    table_name = get_stack_output("RobotTable")
     subscription_key = load_subscription_key()
     if not subscription_key:
         print("Error: XIAOICE_SUBSCRIPTION_KEY not found in env or cdk/.env")
@@ -67,7 +66,7 @@ def sync_postures():
     }
 
     dynamodb = boto3.resource("dynamodb")
-    table = dynamodb.Table(TABLE_NAME)
+    table = dynamodb.Table(table_name)
 
     for name, biz_id in avatars_to_query.items():
         try:

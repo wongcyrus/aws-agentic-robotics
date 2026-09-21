@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 # Fix Docker credential helper issue that occurs in dev containers
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "${SCRIPT_DIR}/fix_docker_credentials.sh"
@@ -22,8 +25,7 @@ fi
 
 # Verify AWS credentials before deploying to avoid silent connection timeouts/hangs
 echo "🔑 Verifying AWS credentials..."
-AWS_IDENTITY_OUT=$(aws sts get-caller-identity 2>&1)
-if [ $? -ne 0 ]; then
+if ! AWS_IDENTITY_OUT=$(aws sts get-caller-identity 2>&1); then
     echo "❌ Error: AWS credentials check failed!"
     echo "Detail: $AWS_IDENTITY_OUT"
     echo ""
@@ -34,7 +36,7 @@ fi
 AWS_USER_ID=$(echo "$AWS_IDENTITY_OUT" | jq -r .UserId 2>/dev/null || aws sts get-caller-identity --query UserId --output text)
 
 cd cdk
-npx cdk deploy --require-approval never --outputs-file output.json --context AwsUserId="$AWS_USER_ID"
+npx cdk deploy AwsAgenticRobotics --require-approval never --outputs-file output.json --context AwsUserId="$AWS_USER_ID"
 jq -S . output.json > output.sorted.json && mv output.sorted.json output.json
 BUCKET=$(jq -r '.[].RobotDataBucketName' output.json)
 aws s3 sync s3://"$BUCKET"/iot-certificates/ ../robot_client/certificates

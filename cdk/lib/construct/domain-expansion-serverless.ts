@@ -29,6 +29,8 @@ import {
   createAgentCoreRuntimeObservability,
 } from "./agentcore-observability";
 
+const KIMI_MODEL_ID = "global.moonshotai.kimi-k3";
+
 function parseDotEnv(filePath: string): Record<string, string> {
   const env: Record<string, string> = {};
   try {
@@ -110,7 +112,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
       environmentVariables: {
         IsInCloud: "yes",
         AWS_BEDROCK_REGION: "us-east-1",
-        BEDROCK_MODEL_ID: "moonshotai.kimi-k2.5",
+        BEDROCK_MODEL_ID: KIMI_MODEL_ID,
       },
     });
 
@@ -126,7 +128,12 @@ export class DomainExpansionServerlessConstruct extends Construct {
           "bedrock:InvokeModelWithResponseStream",
         ],
         resources: [
-          "arn:aws:bedrock:*::foundation-model/moonshotai.kimi-k2.5",
+          Stack.of(this).formatArn({
+            service: "bedrock",
+            resource: "inference-profile",
+            resourceName: KIMI_MODEL_ID,
+          }),
+          "arn:aws:bedrock:*::foundation-model/moonshotai.kimi-k3",
         ],
       })
     );
@@ -221,7 +228,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
         AGENTCORE_RUNTIME_ARN: runtime.agentRuntimeArn,
         OPENCLAW_RUNTIME_ARN: openclawRuntimeArn,
         OPENCLAW_SESSION_ID: openclawSessionId,
-        BEDROCK_MODEL_ID: "moonshotai.kimi-k2.5",
+        BEDROCK_MODEL_ID: KIMI_MODEL_ID,
         BEDROCK_REGION: Stack.of(this).region,
         PHOTOS_S3_BUCKET: photosBucket.bucketName,
         PHOTOS_S3_DOMAIN: photosBucket.bucketRegionalDomainName,
@@ -252,7 +259,12 @@ export class DomainExpansionServerlessConstruct extends Construct {
           "bedrock:InvokeModelWithResponseStream",
         ],
         resources: [
-          "arn:aws:bedrock:*::foundation-model/moonshotai.kimi-k2.5",
+          Stack.of(this).formatArn({
+            service: "bedrock",
+            resource: "inference-profile",
+            resourceName: KIMI_MODEL_ID,
+          }),
+          "arn:aws:bedrock:*::foundation-model/moonshotai.kimi-k3",
         ],
       })
     );
@@ -503,7 +515,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
     distribution.addBehavior("/ws", wsOrigin, wsBehavior);
 
     // 8. Auto-deploy and cache-invalidate Static S3 Frontend assets and dynamic config.json
-    new s3deploy.BucketDeployment(this, "DeployGameAssetsAndConfig", {
+    const gameDeployment = new s3deploy.BucketDeployment(this, "DeployGameAssetsAndConfig", {
       sources: [
         s3deploy.Source.asset(path.join(__dirname, "../../../domain-expansion-ar-game"), {
           exclude: [
@@ -547,6 +559,15 @@ export class DomainExpansionServerlessConstruct extends Construct {
       prune: false,
       memoryLimit: 1024,
     });
+    gameDeployment.handlerRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+        ],
+        resources: [distribution.distributionArn],
+      })
+    );
 
     this.serviceUrl = distribution.distributionDomainName;
     this.webSocketUrl = `wss://${webSocketApi.ref}.execute-api.${Stack.of(this).region}.amazonaws.com/${stage.stageName}`;
