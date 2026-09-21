@@ -2,6 +2,7 @@ import { Construct } from "constructs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as cdk from "aws-cdk-lib";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as logs from "aws-cdk-lib/aws-logs";
 import path = require("path");
 import { SsmUserConstruct } from "./ssm-user";
 
@@ -81,6 +82,10 @@ export class RobotSsmConstruct extends Construct {
       },
       role: functionRole,
       timeout: cdk.Duration.seconds(30),
+      logGroup: new logs.LogGroup(this, "FunctionLogGroup", {
+        retention: logs.RetentionDays.THREE_DAYS,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
     });
 
     for (let thingName of props.thingNames) {

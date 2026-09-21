@@ -1,9 +1,9 @@
-import * as agentcore from "@aws-cdk/aws-bedrock-agentcore-alpha";
-import { ArnFormat, Lazy, Names, Stack } from "aws-cdk-lib";
+import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
+import { ArnFormat, Lazy, Names, RemovalPolicy, Stack } from "aws-cdk-lib";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import type { IGateway } from "aws-cdk-lib/aws-bedrockagentcore";
-import type { IBedrockAgentRuntime } from "@aws-cdk/aws-bedrock-agentcore-alpha";
+import type { IBedrockAgentRuntime } from "aws-cdk-lib/aws-bedrockagentcore";
 import * as xray from "aws-cdk-lib/aws-xray";
 import { Construct } from "constructs";
 
@@ -34,6 +34,7 @@ function createLogGroup(scope: Construct, id: string, logGroupName: string): log
   return new logs.LogGroup(scope, id, {
     logGroupName,
     retention: AGENTCORE_LOG_RETENTION,
+    removalPolicy: RemovalPolicy.DESTROY,
   });
 }
 

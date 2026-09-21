@@ -103,25 +103,25 @@ git submodule update --init --recursive
 
 ### Prerequisites
 
-- Node.js 23+ (for speech control)
+- Node.js 24 LTS or newer (for CDK and local Node.js services)
 - Python 3.8+ (for simulators and robot clients)
 - AWS CLI configured with appropriate permissions
 - Docker (optional, for containerized deployment)
 
 ### Environment Setup
 
-#### Update Node.js to version 23
+#### Update Node.js to version 24 LTS
 
 ```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 ```
 
 Close the terminal and reopen, then:
 
 ```bash
-nvm install 23
-nvm use 23
-nvm alias default 23
+nvm install 24
+nvm use 24
+nvm alias default 24
 ```
 
 #### Install and Update CDK

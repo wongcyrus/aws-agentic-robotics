@@ -1,6 +1,9 @@
 {
   "name": "cdk",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
@@ -11,26 +14,17 @@
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "@types/node": "25.9.1",
-    "aws-cdk": "2.1124.1",
-    "esbuild": "^0.28.0",
-    "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
+    "@types/node": "^24.13.6",
+    "aws-cdk": "2.1142.0",
+    "esbuild": "^0.28.2",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "typescript": "~6.0.3"
   },
   "dependencies": {
-    "@aws-cdk/aws-apigateway": "^1.204.0",
-    "@aws-cdk/aws-bedrock-agentcore-alpha": "^2.257.0-alpha.0",
-    "@aws-cdk/aws-cognito": "^1.204.0",
-    "@aws-cdk/aws-ecr-assets": "^1.204.0",
-    "@aws-cdk/aws-iam": "^1.204.0",
-    "@aws-cdk/aws-iot": "^1.204.0",
-    "@aws-cdk/aws-lambda": "^1.204.0",
-    "@aws-cdk/aws-lambda-python-alpha": "^2.257.0-alpha.0",
-    "@aws-cdk/aws-s3": "^1.204.0",
-    "@aws-cdk/aws-s3-deployment": "^1.204.0",
-    "aws-cdk-lib": "^2.257.0",
-    "constructs": "^10.6.0"
+    "@aws-cdk/aws-lambda-python-alpha": "^2.270.0-alpha.0",
+    "aws-cdk-lib": "^2.270.0",
+    "constructs": "^10.8.1"
   }
 }

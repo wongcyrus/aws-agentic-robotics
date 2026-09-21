@@ -1,5 +1,5 @@
 {
-    "servers": {
+    "mcpServers": {
         "fetch": {
             "type": "stdio",
             "command": "npx",
@@ -8,7 +8,7 @@
                 "@kazuph/mcp-fetch"
             ]
         },
-        "aws-mcp": {
+        "awslabs.aws-documentation-mcp-server": {
             "type": "stdio",
             "command": "uvx",
             "args": [
@@ -17,8 +17,10 @@
             "env": {
                 "FASTMCP_LOG_LEVEL": "ERROR",
                 "AWS_DOCUMENTATION_PARTITION": "aws"
-            }
+            },
+            "tools": [
+                "*"
+            ]
         }
-    },
-    "inputs": []
+    }
 }

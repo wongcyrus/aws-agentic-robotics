@@ -10,7 +10,7 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as apigatewayv2 from "aws-cdk-lib/aws-apigatewayv2";
-import * as agentcore from "@aws-cdk/aws-bedrock-agentcore-alpha";
+import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import { Table, AttributeType, BillingMode, ProjectionType } from "aws-cdk-lib/aws-dynamodb";
 import { Runtime } from "aws-cdk-lib/aws-lambda";
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
@@ -19,8 +19,11 @@ import { Duration, Stack, RemovalPolicy, DockerImage } from "aws-cdk-lib";
 import { UserPool, UserPoolClient } from "aws-cdk-lib/aws-cognito";
 import { DatabaseConstruct } from "./datebase";
 import { RobotSimulatorServerlessConstruct } from "./robot-simulator-serverless";
-import * as logs from "aws-cdk-lib/aws-logs";
-import { SHARED_PYTHON_RUNTIME, SHARED_PYTHON_BUNDLING } from "./lambda-config";
+import {
+  createDestroyableLambdaLogGroup,
+  SHARED_PYTHON_RUNTIME,
+  SHARED_PYTHON_BUNDLING,
+} from "./lambda-config";
 import {
   applyAgentCoreRuntimeLogRetention,
   createAgentCoreRuntimeObservability,
@@ -206,7 +209,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
       runtime: SHARED_PYTHON_RUNTIME,
       timeout: Duration.seconds(30),
       memorySize: 256,
-      logRetention: logs.RetentionDays.THREE_DAYS,
+      logGroup: createDestroyableLambdaLogGroup(this, "LambdaLogGroup"),
       bundling: SHARED_PYTHON_BUNDLING,
       environment: {
         IsInCloud: "yes",

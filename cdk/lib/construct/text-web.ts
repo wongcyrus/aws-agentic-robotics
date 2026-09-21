@@ -1,5 +1,5 @@
 import { RestApi, LambdaIntegration } from "aws-cdk-lib/aws-apigateway";
-import { CfnOutput, Duration, DockerImage, SecretValue } from "aws-cdk-lib";
+import { CfnOutput, Duration, DockerImage, RemovalPolicy, SecretValue } from "aws-cdk-lib";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
@@ -14,7 +14,11 @@ import { TableV2 } from "aws-cdk-lib/aws-dynamodb";
 import * as crypto from "crypto";
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
 import * as ssm from "aws-cdk-lib/aws-ssm";
-import { SHARED_PYTHON_RUNTIME, SHARED_PYTHON_BUNDLING } from "./lambda-config";
+import {
+  createDestroyableLambdaLogGroup,
+  SHARED_PYTHON_RUNTIME,
+  SHARED_PYTHON_BUNDLING,
+} from "./lambda-config";
 interface AgentCoreGatewayAccess {
   readonly gatewayUrl: string;
   grantInvokeGateway(grantee: iam.IGrantable): void;
@@ -74,6 +78,7 @@ export class TextControlWebConstruct extends Construct {
       secretName: "XiaoiceProjectCredentials",
       description: "Access keys and secret keys mapping for Xiaoice projects",
       secretStringValue: SecretValue.unsafePlainText(xiaoiceSecretValue),
+      removalPolicy: RemovalPolicy.DESTROY,
     });
 
     const flaskLambda = new PythonFunction(this, "TextControlLambda", {
@@ -83,6 +88,7 @@ export class TextControlWebConstruct extends Construct {
       handler: "handler",
       timeout: Duration.seconds(30),
       memorySize: 512,
+      logGroup: createDestroyableLambdaLogGroup(this, "TextControlLambdaLogGroup"),
       environment: {
         AWS_BEDROCK_REGION: "us-east-1",
         RobotTable: props.database.robotTable.tableName,

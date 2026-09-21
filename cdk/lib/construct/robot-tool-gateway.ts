@@ -8,6 +8,7 @@ import { Construct } from "constructs";
 import * as fs from "fs";
 import * as os from "os";
 import {
+  createDestroyableLambdaLogGroup,
   SHARED_PYTHON_BUNDLING,
   SHARED_PYTHON_RUNTIME,
 } from "./lambda-config";
@@ -129,6 +130,7 @@ export class RobotToolGatewayConstruct extends Construct {
       index: "robot_tool_lambda.py",
       handler: "lambda_handler",
       timeout: Duration.seconds(30),
+      logGroup: createDestroyableLambdaLogGroup(this, "RobotToolFunctionLogGroup"),
       bundling: SHARED_PYTHON_BUNDLING,
       environment: {
         SIMULATOR_ENDPOINT: props.simulatorEndpoint || "",
@@ -161,6 +163,7 @@ export class RobotToolGatewayConstruct extends Construct {
       index: "digital_human_tool_lambda.py",
       handler: "lambda_handler",
       timeout: Duration.seconds(30),
+      logGroup: createDestroyableLambdaLogGroup(this, "DigitalHumanToolFunctionLogGroup"),
       bundling: SHARED_PYTHON_BUNDLING,
       environment: {
         SIMULATOR_ENDPOINT: props.simulatorEndpoint || "",
