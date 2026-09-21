@@ -4,6 +4,11 @@
 # First install production dependencies
 -r requirements.txt
 
+# Test runner and coverage
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+
 # Code formatters and linters
 isort>=5.13.0
 autopep8>=2.0.4

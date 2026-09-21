@@ -129,7 +129,7 @@ _ROBOT_TOOL_CONFIG: dict[str, dict[str, str]] = {
         "message": "The robot has stopped.",
     },
     "robot_dance_one": {
-        "action": "dance_one",
+        "action": "dance_ten",
         "message": "The robot is performing dance one.",
     },
     "robot_dance_two": {

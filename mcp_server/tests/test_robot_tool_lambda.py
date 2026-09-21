@@ -141,4 +141,4 @@ class RobotToolLambdaTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(json.loads(response["body"]), "The robot is performing dance one.")
-        execute_action.assert_called_once_with("robot_1", "dance_one")
+        execute_action.assert_called_once_with("robot_1", "dance_ten")

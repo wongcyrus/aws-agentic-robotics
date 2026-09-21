@@ -1,0 +1,46 @@
+name: Tests and coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            cdk/package-lock.json
+            domain-expansion-ar-game/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Node.js dependencies
+        run: |
+          npm ci --prefix cdk
+          npm ci --prefix domain-expansion-ar-game
+
+      - name: Run all deterministic tests
+        run: ./scripts/test-all.sh

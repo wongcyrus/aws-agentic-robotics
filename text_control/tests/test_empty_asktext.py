@@ -1,177 +1,100 @@
-#!/usr/bin/env python3
-"""
-Test script to verify that empty or blank askText values are properly rejected
-"""
 import hashlib
 import json
-import os
-import time
-import requests
 
-# Test configuration
-BASE_URL = "http://127.0.0.1:5000"
-ENDPOINTS = [
-    "/api/talk",
-    "/api/xiaoice-chat-api-strands",
-    "/api/xiaoice-chat-api-strands-stream"
-]
+import pytest
+from flask import Flask
+
+from utils import auth, response_utils
 
 
-def calculate_signature_legacy(body_string: str, secret_key: str, timestamp: str) -> str:
-    """Calculate signature for legacy authentication (used by xiaoice endpoints)"""
-    string_to_checksum = body_string + secret_key + timestamp
-    sha512 = hashlib.sha512()
-    sha512.update(string_to_checksum.encode("utf-8"))
-    hex_digest = sha512.hexdigest()
-    return hex_digest.replace("-", "")
+@pytest.fixture
+def app():
+    return Flask(__name__)
 
 
-def calculate_signature_v2(secret_key: str, timestamp: str, body_string: str) -> str:
-    """Calculate signature for authentication following the vendor specification (v2)"""
-    # Create parameter map
-    params = {
-        "bodyString": body_string,
-        "secretKey": secret_key,
-        "timestamp": timestamp,
+@pytest.mark.parametrize("ask_text", ["", "   ", "\t\t", "\n\n", "  \t\n  "])
+def test_parse_request_rejects_empty_ask_text(app, ask_text):
+    with app.test_request_context("/", json={"askText": ask_text}):
+        params, error = response_utils.parse_request_params(["askText"])
+
+    assert params is None
+    assert error.status_code == 400
+    assert error.get_json()["error"]["message"] == "Parameter 'askText' cannot be empty or blank"
+
+
+def test_parse_request_extracts_defaults_and_values(app):
+    payload = {
+        "askText": "move forward",
+        "sessionId": "session-1",
+        "traceId": "trace-1",
+        "extra": {"source": "test"},
+        "languageCode": "en",
+    }
+    with app.test_request_context("/", json=payload):
+        params, error = response_utils.parse_request_params(["askText"])
+
+    assert error is None
+    assert params == {
+        "ask_text": "move forward",
+        "session_id": "session-1",
+        "trace_id": "trace-1",
+        "extra": {"source": "test"},
+        "language_code": "en",
+        "device_id": "",
+        "user_params": "",
+        "lang_by_asr": "",
     }
 
-    # Sort by key name in ascending order and create signature string
-    sorted_params = sorted(params.items())
-    signature_string = "&".join([f"{k}={v}" for k, v in sorted_params])
 
-    # Calculate SHA-512 hash
-    sha512 = hashlib.sha512()
-    sha512.update(signature_string.encode("utf-8"))
-    hex_digest = sha512.hexdigest()
-
-    # Convert to uppercase
-    return hex_digest.replace("-", "").upper()
+def test_legacy_signature_matches_vendor_algorithm():
+    body, secret, timestamp = '{"askText":"hello"}', "secret", "123"
+    expected = hashlib.sha512(f"{body}{secret}{timestamp}".encode()).hexdigest()
+    assert auth.calculate_signature(secret, timestamp, body) == expected
 
 
-def test_empty_asktext(endpoint):
-    """Test that endpoint rejects empty askText"""
-    print(f"\n{'='*80}")
-    print(f"Testing endpoint: {endpoint}")
-    print(f"{'='*80}")
-    
-    # Get credentials from environment
-    secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
-    
-    # Test cases for empty/blank askText
-    test_cases = [
-        ("", "empty string"),
-        ("   ", "whitespace only"),
-        ("\t\t", "tabs only"),
-        ("\n\n", "newlines only"),
-        ("  \t\n  ", "mixed whitespace")
-    ]
-    
-    for ask_text, description in test_cases:
-        print(f"\nTesting {description}: '{repr(ask_text)}'")
-        
-        payload = {
-            "askText": ask_text,
-            "sessionId": "test_session",
-            "traceId": "test_trace"
-        }
-        if endpoint == "/api/talk":
-            payload["userParams"] = "Summer"
-            
-        body_string = json.dumps(payload, separators=(',', ':'))
-        timestamp = str(int(time.time() * 1000))
-        
-        if endpoint == "/api/talk":
-            signature = calculate_signature_v2(secret_key, timestamp, body_string)
-        else:
-            signature = calculate_signature_legacy(body_string, secret_key, timestamp)
-            
-        headers = {
-            "Content-Type": "application/json",
-            "X-Timestamp": timestamp,
-            "X-Sign": signature,
-            "X-Key": access_key
-        }
-        
-        try:
-            response = requests.post(f"{BASE_URL}{endpoint}", data=body_string, headers=headers, timeout=10)
-            
-            if response.status_code == 400:
-                print(f"✅ PASS: Correctly rejected with status 400")
-                try:
-                    error_data = response.json()
-                    print(f"   Error message: {error_data}")
-                except:
-                    print(f"   Raw response: {response.text}")
-            else:
-                print(f"❌ FAIL: Expected status 400, got {response.status_code}")
-                print(f"   Response: {response.text[:200]}...")
-                
-        except requests.exceptions.RequestException as e:
-            print(f"❌ ERROR: Request failed: {e}")
+def test_v2_signature_sorts_fields_and_uppercases():
+    body, secret, timestamp = '{"askText":"hello"}', "secret", "123"
+    source = f"bodyString={body}&secretKey={secret}&timestamp={timestamp}"
+    expected = hashlib.sha512(source.encode()).hexdigest().upper()
+    assert auth.calculate_signature_v2(secret, timestamp, body) == expected
 
-def test_chat_endpoint():
-    """Test the /api/chat endpoint separately"""
-    print(f"\n{'='*80}")
-    print(f"Testing endpoint: /api/chat")
-    print(f"{'='*80}")
-    
-    test_cases = [
-        ("", "empty string"),
-        ("   ", "whitespace only"),
-        ("\t\t", "tabs only"),
-        ("\n\n", "newlines only"),
-        ("  \t\n  ", "mixed whitespace")
-    ]
-    
-    internal_secret = os.getenv("INTERNAL_ROBOT_SECRET", "hktiit_robot_internal_bypass_2026")
-    
-    for message, description in test_cases:
-        print(f"\nTesting {description}: '{repr(message)}'")
-        
-        payload = {
-            "message": message,
-            "session_id": "test_session"
-        }
-        
-        headers = {
-            "Content-Type": "application/json",
-            "X-Internal-Secret": internal_secret
-        }
-        
-        try:
-            response = requests.post(f"{BASE_URL}/api/chat", json=payload, headers=headers, timeout=10)
-            
-            if response.status_code == 400:
-                print(f"✅ PASS: Correctly rejected with status 400")
-                try:
-                    error_data = response.json()
-                    print(f"   Error message: {error_data}")
-                except:
-                    print(f"   Raw response: {response.text}")
-            else:
-                print(f"❌ FAIL: Expected status 400, got {response.status_code}")
-                print(f"   Response: {response.text[:200]}...")
-                
-        except requests.exceptions.RequestException as e:
-            print(f"❌ ERROR: Request failed: {e}")
 
-def main():
-    print("Testing Empty/Blank askText Validation")
-    print("=" * 80)
-    print("This script tests that all endpoints properly reject empty or blank text inputs")
-    
-    # Test the main endpoints
-    for endpoint in ENDPOINTS:
-        test_empty_asktext(endpoint)
-    
-    # Test the chat endpoint
-    test_chat_endpoint()
-    
-    print(f"\n{'='*80}")
-    print("Testing completed!")
-    print("All endpoints should reject empty/blank text with status 400")
-    print(f"{'='*80}")
+def test_validate_authentication_accepts_valid_environment_credentials(app, monkeypatch):
+    body = json.dumps({"askText": "hello"}, separators=(",", ":"))
+    timestamp = "123"
+    signature = auth.calculate_signature_v2("secret", timestamp, body)
+    monkeypatch.setenv(
+        "XIAOICE_PROJECT_CREDENTIALS",
+        json.dumps({"access": {"secret_key": "secret", "project_id": "project-1"}}),
+    )
+    monkeypatch.setattr(auth, "get_secret", lambda _name: None)
 
-if __name__ == "__main__":
-    main()
+    with app.test_request_context(
+        "/api/talk",
+        data=body,
+        content_type="application/json",
+        headers={"X-Timestamp": timestamp, "X-Sign": signature, "X-Key": "access"},
+    ):
+        project_id, error = auth.validate_authentication()
+
+    assert error is None
+    assert project_id == "project-1"
+
+
+def test_validate_authentication_rejects_bad_signature(app, monkeypatch):
+    monkeypatch.setenv(
+        "XIAOICE_PROJECT_CREDENTIALS",
+        json.dumps({"access": {"secret_key": "secret", "project_id": "project-1"}}),
+    )
+    monkeypatch.setattr(auth, "get_secret", lambda _name: None)
+
+    with app.test_request_context(
+        "/api/talk",
+        data="{}",
+        headers={"X-Timestamp": "123", "X-Sign": "wrong", "X-Key": "access"},
+    ):
+        project_id, error = auth.validate_authentication()
+
+    assert project_id is None
+    assert error.status_code == 401
+    assert error.get_json()["error"]["message"] == "Invalid signature"

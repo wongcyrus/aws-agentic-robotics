@@ -1,255 +1,97 @@
-#!/usr/bin/env python3
-"""
-Test scripts for streaming endpoints
-"""
-
-import hashlib
 import json
-import os
-import sys
-import time
-import traceback
-import uuid
-import requests
+
+import pytest
+
+from utils.streaming import (
+    CitationFilter,
+    MarkdownFilter,
+    ThinkingTagFilter,
+    create_sync_stream_wrapper,
+    stream_agent_response,
+)
 
 
-def calculate_signature_legacy(body_string: str, secret_key: str, timestamp: str) -> str:
-    """Calculate signature for legacy authentication (used by xiaoice endpoints)"""
-    string_to_checksum = body_string + secret_key + timestamp
-    sha512 = hashlib.sha512()
-    sha512.update(string_to_checksum.encode("utf-8"))
-    hex_digest = sha512.hexdigest()
-    return hex_digest.replace("-", "")
+def _payload(sse_chunk):
+    return json.loads(sse_chunk.removeprefix("data: ").strip())
 
 
-def calculate_signature_v2(secret_key: str, timestamp: str, body_string: str) -> str:
-    """Calculate signature for authentication following the vendor specification (v2)"""
-    # Create parameter map
-    params = {
-        "bodyString": body_string,
-        "secretKey": secret_key,
-        "timestamp": timestamp,
-    }
-
-    # Sort by key name in ascending order and create signature string
-    sorted_params = sorted(params.items())
-    signature_string = "&".join([f"{k}={v}" for k, v in sorted_params])
-
-    # Calculate SHA-512 hash
-    sha512 = hashlib.sha512()
-    sha512.update(signature_string.encode("utf-8"))
-    hex_digest = sha512.hexdigest()
-
-    # Convert to uppercase
-    return hex_digest.replace("-", "").upper()
-
-
-def test_xiaoice_stream():
-    """Test the /api/xiaoice-chat-api-strands-stream streaming endpoint"""
-    print("Testing XiaoIce streaming endpoint...")
-    
-    # Configuration
-    base_url = "http://127.0.0.1:5000"
-    endpoint = "/api/xiaoice-chat-api-strands-stream"
-    
-    # Get credentials from environment
-    secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
-    
-    # Prepare request
-    timestamp = str(int(time.time() * 1000))
-    session_id = str(uuid.uuid4())
-    trace_id = str(uuid.uuid4())
-    
-    payload = {
-        "askText": "Hello, can you help me control the robot?",
-        "sessionId": session_id,
-        "traceId": trace_id,
-        "languageCode": "en",
-        "deviceId": "test_device"
-    }
-    
-    body_string = json.dumps(payload, separators=(',', ':'))
-    signature = calculate_signature_legacy(body_string, secret_key, timestamp)
-    
-    headers = {
-        "Content-Type": "application/json",
-        "X-Timestamp": timestamp,
-        "X-Sign": signature,
-        "X-Key": access_key
-    }
-    
-    try:
-        response = requests.post(
-            f"{base_url}{endpoint}",
-            data=body_string,
-            headers=headers,
-            stream=True,
-            timeout=30
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        print(f"Headers: {dict(response.headers)}")
-        
-        if response.status_code == 200:
-            print("\nStreaming response:")
-            for line in response.iter_lines(decode_unicode=True):
-                if line:
-                    print(f"Received: {line}")
-        else:
-            print(f"Error response: {response.text}")
-            
-    except Exception as e:
-        print(f"Error: {e}")
-        traceback.print_exc()
-
-
-def test_talk_stream():
-    """Test the /api/talk streaming endpoint"""
-    print("Testing Talk streaming endpoint...")
-    
-    # Configuration
-    base_url = "http://127.0.0.1:5000"
-    endpoint = "/api/talk"
-    
-    # Get credentials from environment
-    secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
-    
-    # Prepare request
-    timestamp = str(int(time.time() * 1000))
-    session_id = str(uuid.uuid4())
-    trace_id = str(uuid.uuid4())
-    
-    payload = {
-        "askText": "Move the robot forward",
-        "sessionId": session_id,
-        "traceId": trace_id,
-        "languageCode": "en",
-        "deviceId": "test_device",
-        "userParams": "robot_1"
-    }
-    
-    body_string = json.dumps(payload, separators=(',', ':'))
-    signature = calculate_signature_v2(secret_key, timestamp, body_string)
-    
-    headers = {
-        "Content-Type": "application/json",
-        "X-Timestamp": timestamp,
-        "X-Sign": signature,
-        "X-Key": access_key
-    }
-    
-    try:
-        response = requests.post(
-            f"{base_url}{endpoint}",
-            data=body_string,
-            headers=headers,
-            stream=True,
-            timeout=30
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        print(f"Headers: {dict(response.headers)}")
-        
-        if response.status_code == 200:
-            print("\nStreaming response:")
-            for line in response.iter_lines(decode_unicode=True):
-                if line:
-                    print(f"Received: {line}")
-        else:
-            print(f"Error response: {response.text}")
-            
-    except Exception as e:
-        print(f"Error: {e}")
-        traceback.print_exc()
-
-
-def test_conversation_continuity():
-    """Test conversation continuity in the same session"""
-    print("Testing conversation continuity...")
-    
-    # Configuration
-    base_url = "http://127.0.0.1:5000"
-    endpoint = "/api/xiaoice-chat-api-strands-stream"
-    
-    # Get credentials from environment
-    secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
-    
-    session_id = str(uuid.uuid4())
-    
-    messages = [
-        "Hello, I want to control a robot",
-        "Make the robot move forward",
-        "Now make it turn left",
-        "Stop the robot"
+def test_thinking_filter_handles_tags_split_across_chunks():
+    filter_obj = ThinkingTagFilter()
+    output = [
+        filter_obj.process("Visible<think"),
+        filter_obj.process("ing>secret"),
+        filter_obj.process("</thinking> answer"),
+        filter_obj.flush(),
     ]
-    
-    for i, message in enumerate(messages, 1):
-        print(f"\n--- Message {i}: {message} ---")
-        
-        timestamp = str(int(time.time() * 1000))
-        trace_id = str(uuid.uuid4())
-        
-        payload = {
-            "askText": message,
-            "sessionId": session_id,
-            "traceId": trace_id,
-            "languageCode": "en",
-            "deviceId": "test_device"
-        }
-        
-        body_string = json.dumps(payload, separators=(',', ':'))
-        signature = calculate_signature_legacy(body_string, secret_key, timestamp)
-        
-        headers = {
-            "Content-Type": "application/json",
-            "X-Timestamp": timestamp,
-            "X-Sign": signature,
-            "X-Key": access_key
-        }
-        
-        try:
-            response = requests.post(
-                f"{base_url}{endpoint}",
-                data=body_string,
-                headers=headers,
-                stream=True,
-                timeout=30
-            )
-            
-            print(f"Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                for line in response.iter_lines(decode_unicode=True):
-                    if line:
-                        print(f"Response: {line}")
-                        break  # Just show first response chunk
-            else:
-                print(f"Error: {response.text}")
-                
-        except Exception as e:
-            print(f"Error: {e}")
-        
-        time.sleep(1)  # Brief pause between messages
+    assert "".join(output) == "Visible answer"
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        test_type = sys.argv[1]
-        if test_type == "xiaoice":
-            test_xiaoice_stream()
-        elif test_type == "talk":
-            test_talk_stream()
-        elif test_type == "continuity":
-            test_conversation_continuity()
-        else:
-            print("Usage: python test_streaming.py [xiaoice|talk|continuity]")
-    else:
-        print("Running all streaming tests...")
-        test_xiaoice_stream()
-        print("\n" + "="*50 + "\n")
-        test_talk_stream()
-        print("\n" + "="*50 + "\n")
-        test_conversation_continuity()
+def test_thinking_filter_drops_unclosed_thought():
+    filter_obj = ThinkingTagFilter()
+    assert filter_obj.process("answer<thinking>hidden") == "answer"
+    assert filter_obj.flush() == ""
+
+
+def test_citation_filter_removes_citations_and_reference_section():
+    filter_obj = CitationFilter()
+    assert filter_obj.process("Fact[a1] and more") == "Fact and more"
+    assert filter_obj.process("**引用") == ""
+    assert filter_obj.process("来源** never emitted") == ""
+    assert filter_obj.flush() == ""
+
+
+def test_markdown_filter_removes_tts_unfriendly_markup():
+    assert MarkdownFilter().process("### **Title**\n- *item*") == "Title\nitem"
+
+
+class FakeAgent:
+    def __init__(self, events=None, error=None):
+        self.events = events or []
+        self.error = error
+
+    async def stream_async(self, _ask_text):
+        for event in self.events:
+            yield event
+        if self.error:
+            raise self.error
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_response_filters_and_marks_final():
+    agent = FakeAgent(
+        [
+            {"event": "duplicate"},
+            {"data": "Hello **world**[1]"},
+            {"data": "<thinking>hidden</thinking>!"},
+        ]
+    )
+    chunks = [
+        _payload(chunk)
+        async for chunk in stream_agent_response(agent, "ask", "session", "trace", {})
+    ]
+
+    assert [chunk["replyText"] for chunk in chunks] == ["Hello world", "!", ""]
+    assert [chunk["isFinal"] for chunk in chunks] == [False, False, True]
+    assert [chunk["id"] for chunk in chunks] == ["trace_1", "trace_2", "trace_3"]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_response_yields_error_then_reraises():
+    emitted = []
+    with pytest.raises(RuntimeError, match="model failed"):
+        async for chunk in stream_agent_response(
+            FakeAgent(error=RuntimeError("model failed")), "ask", "session", "trace", {}
+        ):
+            emitted.append(_payload(chunk))
+
+    assert emitted[0]["replyType"] == "Error"
+    assert emitted[0]["isFinal"] is True
+    assert emitted[0]["replyText"] == "Error: model failed"
+
+
+def test_sync_wrapper_consumes_async_generator():
+    async def values():
+        yield "one"
+        yield "two"
+
+    assert list(create_sync_stream_wrapper(values())) == ["one", "two"]

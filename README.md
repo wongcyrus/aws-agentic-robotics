@@ -223,6 +223,33 @@ aws cognito-idp admin-create-user \
 
 ## 🤖 Component Usage
 
+## Testing and coverage
+
+Run every deterministic unit suite across the CDK application, backend services,
+Node helpers, robot clients, and robot skills:
+
+```bash
+./scripts/test-all.sh
+```
+
+Run only the core backend suites with their enforced line and branch coverage:
+
+```bash
+./scripts/coverage.sh
+```
+
+The backend command covers the simulator backend, MCP server, and speech
+AgentCore backend, and enforces an 80% combined branch-inclusive minimum. Set
+`COVERAGE_MIN` to test a proposed higher threshold:
+
+```bash
+COVERAGE_MIN=85 ./scripts/coverage.sh
+```
+
+The broader command reports component coverage where practical. Only the core
+backend percentage is combined because CDK synthesis, Node helpers, service
+routes, and hardware-facing clients have different executable boundaries.
+
 ### 1. Speech Control Interface
 
 The serverless Speech Control frontend is served globally via AWS CloudFront. To run components locally for development:
