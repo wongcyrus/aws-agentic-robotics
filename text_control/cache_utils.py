@@ -2,7 +2,9 @@
 Cache utilities module - Provides safe access to Flask-Caching instance
 """
 
-import asyncio
+import inspect
+from functools import wraps
+
 from flask import current_app
 
 
@@ -20,8 +22,9 @@ def cache_result(timeout=50, key_prefix="default"):
     """Decorator that caches function results if cache is available"""
 
     def decorator(func):
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             # Handle async functions
+            @wraps(func)
             async def async_wrapper(*args, **kwargs):
                 cache = get_cache()
                 if cache is None:
@@ -44,6 +47,7 @@ def cache_result(timeout=50, key_prefix="default"):
             return async_wrapper
 
         # Handle sync functions
+        @wraps(func)
         def sync_wrapper(*args, **kwargs):
             cache = get_cache()
             if cache is None:

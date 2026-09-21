@@ -1,11 +1,10 @@
 import base64
+import inspect
 import json
 from types import SimpleNamespace
 
-import auth
 import commentary
 import commentary_tts
-import image_processor
 import lambda_function
 
 
@@ -13,24 +12,39 @@ def _body(response):
     return json.loads(response["body"])
 
 
-def test_lambda_handler_dispatches_authorizer_sqs_websocket_and_http(monkeypatch):
-    monkeypatch.setattr(auth, "auth_handler", lambda event, context: {"kind": "auth"})
-    records = []
-    monkeypatch.setattr(image_processor, "handle_sqs_image_gen", lambda record: records.append(record))
-    monkeypatch.setattr(lambda_function, "handle_websocket", lambda event, context: {"kind": "ws"})
-    monkeypatch.setattr(lambda_function, "handle_http", lambda event: {"kind": "http"})
+def test_lambda_entry_point_keeps_aws_signature():
+    assert list(inspect.signature(lambda_function.lambda_handler).parameters) == [
+        "event",
+        "context",
+    ]
 
-    assert lambda_function.lambda_handler({"type": "REQUEST", "methodArn": "arn"}, None) == {"kind": "auth"}
+
+def test_lambda_handler_dispatches_injected_handlers():
+    records = []
+    handlers = {
+        "authorizer": lambda event, context: {"kind": "auth"},
+        "sqs_handler": records.append,
+        "websocket_handler": lambda event, context: {"kind": "ws"},
+        "http_handler": lambda event: {"kind": "http"},
+    }
+
+    assert lambda_function.dispatch_event(
+        {"type": "REQUEST", "methodArn": "arn"}, None, **handlers
+    ) == {"kind": "auth"}
     sqs_event = {
         "Records": [
             {"eventSource": "aws:sqs", "messageId": "one"},
             {"eventSource": "other", "messageId": "two"},
         ]
     }
-    assert lambda_function.lambda_handler(sqs_event, None)["statusCode"] == 200
+    assert lambda_function.dispatch_event(sqs_event, None, **handlers)["statusCode"] == 200
     assert [record["messageId"] for record in records] == ["one"]
-    assert lambda_function.lambda_handler({"requestContext": {"connectionId": "c"}}, None) == {"kind": "ws"}
-    assert lambda_function.lambda_handler({"path": "/health"}, None) == {"kind": "http"}
+    assert lambda_function.dispatch_event(
+        {"requestContext": {"connectionId": "c"}}, None, **handlers
+    ) == {"kind": "ws"}
+    assert lambda_function.dispatch_event(
+        {"path": "/health"}, None, **handlers
+    ) == {"kind": "http"}
 
 
 def test_websocket_connect_and_disconnect_broadcast(monkeypatch):

@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import robot_service as robot_service_module
 from services.robot_service import RobotService
 
 
@@ -24,11 +23,16 @@ class Publisher:
 
 @pytest.fixture
 def service():
-    instance = RobotService.__new__(RobotService)
-    instance.robot_publisher = Publisher()
-    instance.drone_publisher = Publisher()
-    instance.dog_publisher = Publisher()
-    return instance
+    async def available():
+        return {"move", "stop"}
+
+    return RobotService(
+        robot_publisher=Publisher(),
+        drone_publisher=Publisher(),
+        dog_publisher=Publisher(),
+        action_loader=available,
+        sleep_fn=lambda _seconds: None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -68,12 +72,7 @@ def test_execute_dog_action_routes_all_and_rejects_invalid(service):
 
 
 @pytest.mark.asyncio
-async def test_process_actions_validates_each_action(service, monkeypatch):
-    async def available():
-        return {"move", "stop"}
-
-    monkeypatch.setattr(robot_service_module, "get_available_actions", available)
-    monkeypatch.setattr(robot_service_module, "sleep", lambda _seconds: None)
+async def test_process_actions_validates_each_action(service):
     results = await service.process_actions(["move", "unknown"], "robot_1")
     assert results == [
         {"robot": "robot_1", "action": "move", "success": True},
@@ -87,11 +86,11 @@ async def test_process_actions_validates_each_action(service, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_process_actions_returns_empty_on_lookup_failure(service, monkeypatch):
+async def test_process_actions_returns_empty_on_lookup_failure(service):
     async def unavailable():
         raise RuntimeError("MCP unavailable")
 
-    monkeypatch.setattr(robot_service_module, "get_available_actions", unavailable)
+    service._action_loader = unavailable
     assert await service.process_actions(["move"], "robot_1") == []
 
 
@@ -151,14 +150,11 @@ def test_capture_image_publishes_and_returns_read_url(service, monkeypatch):
 
     s3, publishes = S3(), []
     monkeypatch.setenv("MEDIA_BUCKET_NAME", "bucket")
-    monkeypatch.setattr(robot_service_module.uuid_mod, "uuid4", lambda: "fixed")
-    monkeypatch.setattr(robot_service_module.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        robot_service_module.boto3,
-        "client",
+    service._uuid_factory = lambda: "fixed"
+    service._client_factory = (
         lambda name, **kwargs: s3
         if name == "s3"
-        else SimpleNamespace(publish=lambda **call: publishes.append(call)),
+        else SimpleNamespace(publish=lambda **call: publishes.append(call))
     )
     assert service.capture_image("robot_1") == {
         "success": True,
@@ -172,13 +168,11 @@ def test_capture_image_returns_iot_failure(service, monkeypatch):
         generate_presigned_url=lambda *args, **kwargs: "https://upload",
     )
     monkeypatch.setenv("MEDIA_BUCKET_NAME", "bucket")
-    monkeypatch.setattr(
-        robot_service_module.boto3,
-        "client",
+    service._client_factory = (
         lambda name, **kwargs: s3
         if name == "s3"
         else SimpleNamespace(
             publish=lambda **call: (_ for _ in ()).throw(RuntimeError("down"))
-        ),
+        )
     )
     assert service.capture_image("robot_1")["error"] == "IoT publish failed: down"

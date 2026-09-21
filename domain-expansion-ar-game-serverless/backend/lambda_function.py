@@ -105,21 +105,35 @@ def optimize_commentary_image(image_bytes, max_dimension=640, quality=70):
         logger.warning("Failed to optimize commentary image, using original bytes: %s", exc)
         return image_bytes
 
-def lambda_handler(event, context):
+def dispatch_event(
+    event,
+    context,
+    *,
+    authorizer=None,
+    sqs_handler=None,
+    websocket_handler=None,
+    http_handler=None,
+):
     logger.info(f"Incoming Event: {json.dumps(event)}")
     
     # 0. Check for API Gateway Custom Authorizer REQUEST payload
     if event.get("type") == "REQUEST" and "methodArn" in event:
-        from auth import auth_handler
-        return auth_handler(event, context)
+        if authorizer is None:
+            from auth import auth_handler
+
+            authorizer = auth_handler
+        return authorizer(event, context)
     
     # 1. Check for SQS Trigger
     if "Records" in event:
-        from image_processor import handle_sqs_image_gen
+        if sqs_handler is None:
+            from image_processor import handle_sqs_image_gen
+
+            sqs_handler = handle_sqs_image_gen
         for record in event["Records"]:
             if record.get("eventSource") == "aws:sqs":
                 try:
-                    handle_sqs_image_gen(record)
+                    sqs_handler(record)
                 except Exception as e:
                     logger.error(f"SQS generation failed: {e}")
         return {"statusCode": 200, "body": "SQS Records processed."}
@@ -127,10 +141,15 @@ def lambda_handler(event, context):
     # 2. Detect WebSocket API Gateway connection
     request_context = event.get("requestContext", {})
     if "connectionId" in request_context:
-        return handle_websocket(event, request_context)
+        return (websocket_handler or handle_websocket)(event, request_context)
         
     # 3. Treat as HTTP API Gateway REST call
-    return handle_http(event)
+    return (http_handler or handle_http)(event)
+
+
+def lambda_handler(event, context):
+    """AWS Lambda entry point."""
+    return dispatch_event(event, context)
 
 
 # WebSocket API Handler

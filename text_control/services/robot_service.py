@@ -7,7 +7,6 @@ better error handling, and separation of concerns.
 
 import json
 import os
-import time
 import uuid as uuid_mod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import sleep
@@ -33,10 +32,25 @@ logger = get_lambda_logger(__name__)
 class RobotService:
     """Main service class for robot operations"""
 
-    def __init__(self):
-        self.robot_publisher = StandardRobotPublisher()
-        self.drone_publisher = DronePublisher()
-        self.dog_publisher = DogPublisher()
+    def __init__(
+        self,
+        robot_publisher=None,
+        drone_publisher=None,
+        dog_publisher=None,
+        executor_factory=None,
+        action_loader=None,
+        sleep_fn=None,
+        client_factory=None,
+        uuid_factory=None,
+    ):
+        self.robot_publisher = robot_publisher or StandardRobotPublisher()
+        self.drone_publisher = drone_publisher or DronePublisher()
+        self.dog_publisher = dog_publisher or DogPublisher()
+        self._executor_factory = executor_factory or ThreadPoolExecutor
+        self._action_loader = action_loader or get_available_actions
+        self._sleep = sleep_fn or sleep
+        self._client_factory = client_factory or boto3.client
+        self._uuid_factory = uuid_factory or uuid_mod.uuid4
 
     def _get_robot_ids(self) -> List[str]:
         """Get list of robot IDs"""
@@ -50,7 +64,7 @@ class RobotService:
         parameters: Dict[str, Any] = None,
     ) -> bool:
         """Execute actions in parallel for multiple robots"""
-        with ThreadPoolExecutor() as executor:
+        with self._executor_factory() as executor:
             futures = {
                 executor.submit(
                     publisher.publish, robot_id, message, parameters
@@ -178,7 +192,7 @@ class RobotService:
         results = []
 
         try:
-            available_actions = await get_available_actions()
+            available_actions = await self._action_loader()
 
             for action in actions_to_execute:
                 if action in available_actions:
@@ -188,7 +202,7 @@ class RobotService:
                     results.append(
                         {"robot": selected_robot, "action": action, "success": success}
                     )
-                    sleep(ACTION_DELAY)
+                    self._sleep(ACTION_DELAY)
                 else:
                     logger.warning(f"Action '{action}' is not available")
                     results.append(
@@ -332,18 +346,18 @@ class RobotService:
             logger.error("MEDIA_BUCKET_NAME not configured")
             return {"success": False, "error": "Image bucket not configured"}
 
-        s3_client = boto3.client(
+        s3_client = self._client_factory(
             "s3", config=Config(
                 retries={"max_attempts": 3, "mode": "standard"},
                 signature_version="s3v4"
             )
         )
-        iot_client = boto3.client(
+        iot_client = self._client_factory(
             "iot-data", config=Config(retries={"max_attempts": 3, "mode": "standard"})
         )
 
         # 1. Generate presigned PUT URL
-        object_key = f"robot-images/{robot_id}/{uuid_mod.uuid4()}.jpg"
+        object_key = f"robot-images/{robot_id}/{self._uuid_factory()}.jpg"
         upload_url = s3_client.generate_presigned_url(
             "put_object",
             Params={
@@ -386,7 +400,7 @@ class RobotService:
                 logger.info("Image uploaded by %s, presigned GET URL generated", robot_id)
                 return {"success": True, "image_url": read_url}
             except s3_client.exceptions.ClientError:
-                time.sleep(0.5)
+                self._sleep(0.5)
                 elapsed += 0.5
 
         logger.warning("Robot %s did not upload image within timeout", robot_id)

@@ -5,7 +5,7 @@ import logging
 import os
 
 import awsgi2
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from flask_caching import Cache
 
 from config import DEBUG
@@ -25,7 +25,7 @@ from routes.api import api_bp  # pylint: disable=wrong-import-position
 from routes.auth import auth_bp  # pylint: disable=wrong-import-position
 from routes.ui import ui_bp  # pylint: disable=wrong-import-position
 
-config = {
+DEFAULT_CONFIG = {
     "DEBUG": DEBUG,  # some Flask specific configs
     "CACHE_TYPE": "SimpleCache",  # Flask-Caching related configs
     "CACHE_DEFAULT_TIMEOUT": 300,
@@ -34,18 +34,6 @@ config = {
     ),  # Required for sessions - use a consistent fallback for Lambda
 }
 
-# Initialize the Flask application
-app = Flask(__name__)
-
-app.config.from_mapping(config)
-cache = Cache(app)
-
-# Make cache available as app attribute for easy access
-app.cache = cache
-
-
-# Add global request logging hook for debugging
-@app.before_request
 def log_request_info():
     """Log details of every incoming request for debugging purposes."""
     try:
@@ -105,8 +93,6 @@ def log_request_info():
         print(f"Error in request logging hook: {str(e)}", flush=True)
 
 
-# Add CORS headers for API Gateway
-@app.after_request
 def after_request(response):
     """Add CORS headers to all responses."""
     response.headers.add("Access-Control-Allow-Origin", "*")
@@ -119,24 +105,41 @@ def after_request(response):
     return response
 
 
-# Initialize the MCP client when the app starts
-with app.app_context():
-    get_mcp_client()
+def create_app(config_overrides=None, initialize_mcp=True):
+    """Create the Flask application with optional startup side effects."""
+    flask_app = Flask(__name__)
+    flask_app.config.from_mapping(DEFAULT_CONFIG)
+    if config_overrides:
+        flask_app.config.from_mapping(config_overrides)
+
+    flask_app.cache = Cache(flask_app)
+    flask_app.before_request(log_request_info)
+    flask_app.after_request(after_request)
+    flask_app.register_blueprint(api_bp)
+    flask_app.register_blueprint(ui_bp)
+    flask_app.register_blueprint(auth_bp)
+    register_error_handlers(flask_app)
+
+    if initialize_mcp:
+        with flask_app.app_context():
+            get_mcp_client()
+
+    return flask_app
 
 
-# Register the blueprints
-app.register_blueprint(api_bp)
-app.register_blueprint(ui_bp)
-app.register_blueprint(auth_bp)
-
-# Register error handlers
-register_error_handlers(app)
+app = create_app()
 
 # Register cleanup function to run at exit
 atexit.register(cleanup_mcp_client)
 
 
-def handler(event, context):
+def handle_lambda_request(
+    event,
+    context,
+    application=None,
+    response_adapter=None,
+    invocation_notifier=None,
+):
     """AWS Lambda handler for the Flask application"""
     try:
         # Log the raw Lambda event for debugging
@@ -158,12 +161,21 @@ def handler(event, context):
         print(f"Error logging Lambda event: {e}")
 
     try:
-        from mcp_client import notify_new_invocation
+        if invocation_notifier is None:
+            from mcp_client import notify_new_invocation
+
+            invocation_notifier = notify_new_invocation
         if hasattr(context, "aws_request_id"):
-            notify_new_invocation(context.aws_request_id)
+            invocation_notifier(context.aws_request_id)
     except Exception as e:
         print(f"Error notifying new invocation to MCP client: {e}")
-    return awsgi2.response(app, event, context)
+    responder = response_adapter or awsgi2.response
+    return responder(application or app, event, context)
+
+
+def handler(event, context):
+    """AWS Lambda entry point."""
+    return handle_lambda_request(event, context)
 
 
 if __name__ == "__main__":
