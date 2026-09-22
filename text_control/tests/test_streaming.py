@@ -1,13 +1,14 @@
 import json
 
 import pytest
-
 from utils.streaming import (
     CitationFilter,
     MarkdownFilter,
     ThinkingTagFilter,
+    ToolMarkerFilter,
     create_sync_stream_wrapper,
     stream_agent_response,
+    strip_tool_markers,
 )
 
 
@@ -44,6 +45,20 @@ def test_markdown_filter_removes_tts_unfriendly_markup():
     assert MarkdownFilter().process("### **Title**\n- *item*") == "Title\nitem"
 
 
+def test_tool_marker_filter_removes_complete_and_split_markers():
+    marker = "%[digital-human-mcp-lambda___digital_human_speech]%"
+    assert strip_tool_markers(f"Visible{marker}") == "Visible"
+
+    filter_obj = ToolMarkerFilter()
+    output = [
+        filter_obj.process("Visible%[digital-human"),
+        filter_obj.process("-mcp-lambda___digital_human_speech"),
+        filter_obj.process("]%"),
+        filter_obj.flush(),
+    ]
+    assert "".join(output) == "Visible"
+
+
 class FakeAgent:
     def __init__(self, events=None, error=None):
         self.events = events or []
@@ -63,6 +78,8 @@ async def test_stream_agent_response_filters_and_marks_final():
             {"event": "duplicate"},
             {"data": "Hello **world**[1]"},
             {"data": "<thinking>hidden</thinking>!"},
+            {"data": "%[digital-human-mcp-lambda___digital_"},
+            {"data": "human_speech]%"},
         ]
     )
     chunks = [

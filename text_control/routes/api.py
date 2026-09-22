@@ -9,31 +9,35 @@ from datetime import datetime
 
 from flask import Blueprint, Response, jsonify, request
 from middleware import require_hybrid_auth
-from services.database_service import delete_robot, get_robot, list_robots, upsert_robot
-from services.speech_db_service import delete_speech_message, get_pending_speech_message
-from services.robot_service import robot_service
-from services.robot_api import ActionRequest, SpeechRequest, extract_mcp_text
 from services.chat_orchestration import (
     RobotPromptContext,
     StreamRequest,
     create_agent_stream,
 )
+from services.database_service import delete_robot, get_robot, list_robots, upsert_robot
+from services.robot_api import ActionRequest, SpeechRequest, extract_mcp_text
+from services.robot_service import robot_service
+from services.speech_db_service import delete_speech_message, get_pending_speech_message
 from services.strands_service_mcp import create_robot_agent as create_robot_agent_mcp
 from utils.auth import validate_authentication
 from utils.lambda_logger import get_lambda_logger
-from utils.observability import Metric, MetricsEmitter
 from utils.messages import (
     GOODBYE_MESSAGES,
     RECOMMENDED_QUESTIONS,
     WELCOME_MESSAGES,
     get_message,
 )
+from utils.observability import Metric, MetricsEmitter
 from utils.response_utils import (
     create_response_object,
     error_response,
     parse_request_params,
 )
-from utils.streaming import create_sync_stream_wrapper, stream_agent_response
+from utils.streaming import (
+    create_sync_stream_wrapper,
+    stream_agent_response,
+    strip_tool_markers,
+)
 
 # Suppress OpenTelemetry context warnings (harmless in async streaming context)
 logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
@@ -192,9 +196,9 @@ IMPORTANT RULES:
 """
 
         try:
+            import config
             from strands import Agent
             from strands.models import BedrockModel
-            import config
 
             nova_model = BedrockModel(
                 model_id=config.NOVA_MODEL_ID,
@@ -333,7 +337,7 @@ def chat_api_strands():
             "traceId": params["trace_id"],
             "sessionId": params["session_id"],
             "askText": params["ask_text"],
-            "replyText": str(result),
+            "replyText": strip_tool_markers(str(result)),
             "replyType": "Llm",
             "timestamp": now.timestamp(),
             "replyPayload": params.get("extra", {}).get("replyPayload"),
@@ -493,7 +497,7 @@ async def _chat(data):
         response = await agent.invoke_async(user_message)
 
         return jsonify({
-            "response": str(response),
+            "response": strip_tool_markers(str(response)),
             "session_id": session_id,
         })
 
@@ -657,6 +661,7 @@ def robot_speech(robot_id):
 def get_image_url(object_key):
     """Generate a short-lived presigned GET URL for a robot-captured image."""
     import os
+
     import boto3
     from botocore.config import Config
 

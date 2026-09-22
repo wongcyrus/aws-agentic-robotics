@@ -3,6 +3,7 @@ import atexit
 import json
 import logging
 import os
+from functools import partial
 
 import awsgi2
 from flask import Flask, request
@@ -33,6 +34,14 @@ DEFAULT_CONFIG = {
     "SECRET_KEY": os.getenv(
         "FlaskSecretKey", "fallback-secret-key-for-lambda-sessions-12345"
     ),  # Required for sessions - use a consistent fallback for Lambda
+}
+
+BINARY_CONTENT_TYPES = {
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/vnd.microsoft.icon",
+    "image/webp",
 }
 
 
@@ -120,7 +129,10 @@ def handle_lambda_request(
             invocation_notifier(context.aws_request_id)
     except Exception as e:
         print(f"Error notifying new invocation to MCP client: {e}")
-    responder = response_adapter or awsgi2.response
+    responder = response_adapter or partial(
+        awsgi2.response,
+        base64_content_types=BINARY_CONTENT_TYPES,
+    )
     return responder(application or app, event, context)
 
 

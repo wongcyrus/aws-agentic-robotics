@@ -258,6 +258,9 @@ describe("serverless web constructs", () => {
         }),
       },
     });
+    template.hasResourceProperties("AWS::ApiGateway::RestApi", {
+      BinaryMediaTypes: ["image/*"],
+    });
     template.hasResourceProperties("AWS::SSM::Parameter", {
       Name: "/robotics/robot_api_url",
       Type: "String",

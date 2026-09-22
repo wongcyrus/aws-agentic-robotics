@@ -310,5 +310,8 @@ def test_ui_pages_render_for_authenticated_session(client):
     assert client.get("/index").status_code == 200
     assert client.get("/robot").status_code == 200
     assert client.get("/cleanup").status_code == 200
-    assert client.get("/login").status_code == 200
+    login_response = client.get("/login")
+    assert login_response.status_code == 200
+    assert 'class="login-page"' in login_response.get_data(as_text=True)
+    assert "login-card" in login_response.get_data(as_text=True)
     assert client.get("/favicon.ico").status_code == 404

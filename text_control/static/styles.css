@@ -79,6 +79,56 @@ body {
   box-shadow: 0 0 8px #22c55e;
 }
 
+/* Login page */
+.login-page .login-card {
+  overflow: hidden;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5) !important;
+}
+
+.login-page .login-card .card-header {
+  color: #ffffff;
+}
+
+.login-page .login-card .card-body {
+  padding: 2rem;
+  background: rgba(15, 23, 42, 0.96);
+}
+
+.login-page .login-card .form-label {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.login-page .login-card .form-control {
+  background: #111827 !important;
+  border-color: rgba(148, 163, 184, 0.4) !important;
+  color: #f8fafc !important;
+}
+
+.login-page .login-card .form-control:focus {
+  background: #111827 !important;
+  border-color: #22d3ee !important;
+}
+
+.login-page .login-card .btn-primary {
+  color: #ffffff;
+  font-weight: 600;
+  background: linear-gradient(135deg, #4f46e5 0%, #0891b2 100%);
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 20px;
+}
+
+.login-page .login-card .btn-primary:hover,
+.login-page .login-card .btn-primary:focus {
+  background: linear-gradient(135deg, #4338ca 0%, #0e7490 100%);
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.18);
+}
+
 /* Card Body (Messages Box) */
 #messages {
   height: 460px;

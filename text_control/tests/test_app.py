@@ -93,7 +93,37 @@ def test_lambda_handler_tolerates_nonserializable_event_and_missing_request_id(
     monkeypatch.setattr(
         app_module.awsgi2,
         "response",
-        lambda flask_app, event, context: {"statusCode": 200},
+        lambda flask_app, event, context, **kwargs: {"statusCode": 200},
     )
     result = app_module.handler({"value": object()}, SimpleNamespace())
     assert result == {"statusCode": 200}
+
+
+def test_lambda_handler_configures_binary_image_responses(monkeypatch):
+    app_module = _load_app(monkeypatch)
+    captured = {}
+
+    def response_adapter(
+        flask_app,
+        event,
+        context,
+        base64_content_types=None,
+    ):
+        captured["base64_content_types"] = base64_content_types
+        return {"statusCode": 200}
+
+    monkeypatch.setattr(app_module.awsgi2, "response", response_adapter)
+    result = app_module.handle_lambda_request(
+        {"requestContext": {"http": {"method": "GET", "path": "/static/logo.png"}}},
+        SimpleNamespace(),
+        invocation_notifier=lambda _request_id: None,
+    )
+
+    assert result == {"statusCode": 200}
+    assert captured["base64_content_types"] == {
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/vnd.microsoft.icon",
+        "image/webp",
+    }

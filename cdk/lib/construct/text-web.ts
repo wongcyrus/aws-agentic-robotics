@@ -46,6 +46,7 @@ export class TextControlWebConstruct extends Construct {
     const restApi = new RestApi(this, "TextControlWebApi", {
       restApiName: "TextControlWebApi",
       description: "API for Text Control Robot Web",
+      binaryMediaTypes: ["image/*"],
       deployOptions: {
         stageName: "prod",
         throttlingRateLimit: 100,

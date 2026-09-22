@@ -111,9 +111,34 @@ https://djt9g9bto90gy.cloudfront.net/xiaoice_human.html?project_id=<TARGET_PROJE
    XIAOICE_SUBSCRIPTION_KEY=your_partner_subscription_key_here
    XIAOICE_PROJECT_ID=f989c84f7bc7439aa238356ebe5045f1
    ```
-3. **Deploy the Stack**:
-   Run the deployment script:
+3. **Prepare project-specific Xiaoice webhook credentials** (optional):
    ```bash
+   cd ../text_control
+   python3 generate_keys.py Summer,Midnight
+   cd ../cdk
+   ```
+   Replace the example project IDs with the IDs you use. The command creates
+   `text_control/xiaoice_credentials.json`, which is gitignored and must never
+   be committed. During deployment, CDK seeds the
+   `XiaoiceProjectCredentials` AWS Secrets Manager secret from this file. If
+   you do not use project-specific Xiaoice webhooks, you can omit this step;
+   the deployment warning about using an empty object is expected.
+4. **Deploy the Stack**:
+   Run the deployment script from the repository root:
+   ```bash
+   cd ..
    ./deploy.sh
    ```
    The CDK application automatically maps these values securely into the Lambda function's environment variables. If no `XIAOICE_SUBSCRIPTION_KEY` is supplied, the Lambda backend will recognize this and gracefully fallback to generating local signature handshakes using the app secret, keeping the console operational.
+5. **Create a Cognito login user**:
+
+   The deployment does not create a default username or password, and Cognito
+   self-registration is disabled. Load the deployment outputs and create a
+   user with an email address and permanent password:
+
+   ```bash
+   source ./load_cdkstack_env.sh
+   python3 text_control/create_user.py operator@example.com 'ChooseAStrongPassword123!'
+   ```
+
+   Use that email address and password on the application login pages.

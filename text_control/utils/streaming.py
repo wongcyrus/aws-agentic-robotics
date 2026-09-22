@@ -8,6 +8,57 @@ import sys
 import time
 from typing import AsyncGenerator, Dict
 
+TOOL_MARKER_PATTERN = re.compile(
+    r"%\[[A-Za-z0-9_.:-]+___[A-Za-z0-9_.:-]+\]%"
+)
+
+
+def strip_tool_markers(text: str) -> str:
+    """Remove internal AgentCore Gateway tool markers from response text."""
+    return TOOL_MARKER_PATTERN.sub("", text)
+
+
+class ToolMarkerFilter:
+    """Remove tool markers even when they are split across stream chunks."""
+
+    def __init__(self):
+        self.buffer = ""
+
+    def process(self, text: str) -> str:
+        self.buffer += text
+        output = []
+
+        while self.buffer:
+            marker_start = self.buffer.find("%[")
+            if marker_start == -1:
+                if self.buffer.endswith("%"):
+                    output.append(self.buffer[:-1])
+                    self.buffer = "%"
+                else:
+                    output.append(self.buffer)
+                    self.buffer = ""
+                break
+
+            output.append(self.buffer[:marker_start])
+            marker_end = self.buffer.find("]%", marker_start + 2)
+            if marker_end == -1:
+                self.buffer = self.buffer[marker_start:]
+                break
+
+            candidate = self.buffer[marker_start : marker_end + 2]
+            if not TOOL_MARKER_PATTERN.fullmatch(candidate):
+                output.append(candidate)
+            self.buffer = self.buffer[marker_end + 2 :]
+
+        return "".join(output)
+
+    def flush(self) -> str:
+        output = strip_tool_markers(self.buffer)
+        if self.buffer.startswith("%[") and "___" in self.buffer:
+            output = ""
+        self.buffer = ""
+        return output
+
 
 class ThinkingTagFilter:
     """Filter to remove <thinking>...</thinking> tags from streaming text"""
@@ -171,6 +222,7 @@ async def stream_agent_response(
     logger = get_lambda_logger(__name__)
     
     filter_obj = ThinkingTagFilter()
+    tool_marker_filter = ToolMarkerFilter()
     citation_filter = CitationFilter()
     markdown_filter = MarkdownFilter()
     chunk_count = 0
@@ -197,6 +249,7 @@ async def stream_agent_response(
             
             # Filter thinking tags
             filtered_text = filter_obj.process(event_data)
+            filtered_text = tool_marker_filter.process(filtered_text)
             filtered_text = citation_filter.process(filtered_text)
             filtered_text = markdown_filter.process(filtered_text)
             
@@ -218,9 +271,11 @@ async def stream_agent_response(
         
         # Send final buffered content
         remaining = filter_obj.flush()
-        if remaining:
-            remaining = citation_filter.process(remaining)
+        remaining = tool_marker_filter.process(remaining)
+        remaining += tool_marker_filter.flush()
+        remaining = citation_filter.process(remaining)
         remaining += citation_filter.flush()
+        remaining = markdown_filter.process(remaining)
         
         if remaining:
             chunk_count += 1

@@ -152,9 +152,27 @@ aws configure
 ```bash
 cd cdk
 cdk bootstrap
+cd ..
 ```
 
-2. **Deploy Stacks**:
+2. **Prepare Xiaoice project credentials** (optional):
+
+Project-specific Xiaoice webhook authentication uses a local, gitignored
+credential map that CDK copies into the `XiaoiceProjectCredentials` AWS Secrets
+Manager secret during deployment:
+
+```bash
+cd text_control
+python3 generate_keys.py Summer,Midnight
+cd ..
+```
+
+Replace the example project IDs with the IDs you use. If credentials already
+exist, place the JSON file at `text_control/xiaoice_credentials.json`. Never
+commit this file. If you do not use project-specific Xiaoice webhooks, you can
+omit this step; deployment will log that it is using an empty object.
+
+3. **Deploy Stacks**:
    Install jq, if you don't have it.
 
 ```bash
@@ -198,7 +216,21 @@ unchanged:
 Each check is bounded by the configured timeout. The AgentCore check can incur a
 small runtime/model charge and requires `bedrock-agentcore:InvokeAgentRuntime`.
 
-3. **Destroy Stacks** (when needed):
+4. **Create a Cognito login user**:
+
+The deployment does not create a default username or password, and Cognito
+self-registration is disabled. After deployment, load the stack outputs and
+create a user. The email address is the login name, and the supplied password is
+set as the permanent password:
+
+```bash
+source ./load_cdkstack_env.sh
+python3 text_control/create_user.py operator@example.com 'ChooseAStrongPassword123!'
+```
+
+Use this email address and password on the application login pages.
+
+5. **Destroy Stacks** (when needed):
 
 ```bash
 cd cdk
@@ -232,14 +264,16 @@ aws s3 sync s3://$RobotDataBucketName robot_client/certificates/
 
 #### Create Test Users (for authentication)
 
-You can easily register or create test users directly inside your AWS Cognito User Pool via the AWS CLI:
+There is no default Cognito username or password, and self-registration is
+disabled. Create users with an email address and a password that satisfies the
+Cognito password policy:
 
 ```bash
-aws cognito-idp admin-create-user \
-  --user-pool-id $CognitoUserPoolId \
-  --username testuser \
-  --user-attributes Name=email,Value=testuser@example.com
+source ./load_cdkstack_env.sh
+python3 text_control/create_user.py testuser@example.com 'ChooseAStrongPassword123!'
 ```
+
+The email address is the username used on the application login pages.
 
 ## 🤖 Component Usage
 
