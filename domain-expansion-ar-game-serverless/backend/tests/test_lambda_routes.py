@@ -3,6 +3,8 @@ import inspect
 import json
 from types import SimpleNamespace
 
+import pytest
+
 import commentary
 import commentary_tts
 import lambda_function
@@ -45,6 +47,7 @@ def test_lambda_handler_dispatches_injected_handlers():
     assert lambda_function.dispatch_event(
         {"path": "/health"}, None, **handlers
     ) == {"kind": "http"}
+    assert lambda_function.dispatch_event([], None)["statusCode"] == 400
 
 
 def test_websocket_connect_and_disconnect_broadcast(monkeypatch):
@@ -108,6 +111,28 @@ def test_websocket_signal_unicast_and_missing_sender(monkeypatch):
 
     table.get_item = lambda **kwargs: {}
     assert lambda_function.handle_websocket(event, context)["statusCode"] == 404
+
+
+def test_websocket_action_failure_returns_controlled_error(monkeypatch):
+    table = SimpleNamespace(
+        put_item=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("write failed"))
+    )
+    monkeypatch.setattr(lambda_function, "connections_table", table)
+    monkeypatch.setattr(
+        lambda_function.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(post_to_connection=lambda **kwargs: None),
+    )
+    response = lambda_function.handle_websocket(
+        {"body": json.dumps({"action": "join_room"})},
+        {
+            "connectionId": "self",
+            "routeKey": "message",
+            "domainName": "example",
+            "stage": "dev",
+        },
+    )
+    assert response == {"statusCode": 500, "body": "WebSocket action failed"}
 
 
 def test_register_room_log_and_unknown_routes(monkeypatch):
@@ -320,7 +345,8 @@ def test_gateway_tool_no_url_success_and_failure(monkeypatch):
         "post",
         lambda *args, **kwargs: SimpleNamespace(status_code=500, text="bad"),
     )
-    assert lambda_function.invoke_agentcore_gateway_tool("tool", {}) is None
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        lambda_function.invoke_agentcore_gateway_tool("tool", {})
 
 
 def test_live_status_attaches_both_s3_images(monkeypatch):

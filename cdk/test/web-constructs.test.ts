@@ -49,6 +49,7 @@ describe("serverless web constructs", () => {
     const simulator = new RobotSimulatorServerlessConstruct(stack, "Simulator", {
       userPoolId: "user-pool-id",
       userPoolClientId: "client-id",
+      internalRobotSecret: "test-internal-secret",
     });
 
     expect(simulator.serviceUrl).toBeDefined();
@@ -84,7 +85,21 @@ describe("serverless web constructs", () => {
       ProtocolType: "WEBSOCKET",
       RouteSelectionExpression: "$request.body.action",
     });
-    template.resourceCountIs("AWS::ApiGatewayV2::Route", 3);
+    const webSocketRoutes = Object.values(
+      template.findResources("AWS::ApiGatewayV2::Route")
+    ).map((resource) => resource.Properties);
+    expect(webSocketRoutes.map((route) => route.RouteKey).sort()).toEqual([
+      "$connect",
+      "$default",
+      "$disconnect",
+    ]);
+    expect(
+      new Set(webSocketRoutes.map((route) => JSON.stringify(route.Target))).size
+    ).toBe(1);
+    template.hasResourceProperties("AWS::ApiGatewayV2::Integration", {
+      IntegrationType: "AWS_PROXY",
+      IntegrationUri: Match.anyValue(),
+    });
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
       AutoDeploy: true,
       StageName: "prod",
@@ -103,6 +118,44 @@ describe("serverless web constructs", () => {
     expect(policies).toContain("execute-api:ManageConnections");
     expect(policies).toContain("cloudfront:GetInvalidation");
     expect(policies).toContain("ssm:GetParameter");
+    expect(policies).not.toContain('"Action":"*"');
+
+    template.hasResourceProperties("AWS::S3::Bucket", {
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: [
+          {
+            ServerSideEncryptionByDefault: {
+              SSEAlgorithm: "AES256",
+            },
+          },
+        ],
+      },
+      // This static website is intentionally public; writes and public ACLs remain blocked.
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: true,
+        BlockPublicPolicy: false,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: false,
+      },
+    });
+    template.resourcePropertiesCountIs(
+      "AWS::DynamoDB::Table",
+      Match.objectLike({
+        SSESpecification: {
+          SSEEnabled: true,
+        },
+      }),
+      2
+    );
+    template.hasResourceProperties("AWS::Lambda::Function", {
+      Handler: "lambda_function.py.lambda_handler",
+      LoggingConfig: {
+        LogGroup: Match.anyValue(),
+      },
+    });
+    template.hasResourceProperties("AWS::Logs::LogGroup", {
+      RetentionInDays: 3,
+    });
   });
 
   test("robot simulator supports default props and forwards optional credentials", () => {
@@ -162,6 +215,7 @@ describe("serverless web constructs", () => {
       userPool,
       userPoolClient,
       roboticBucket,
+      internalRobotSecret: "test-internal-secret",
       robotGatewayConstruct: {
         gatewayUrl: "https://gateway.example.test",
         grantInvokeGateway,
@@ -272,6 +326,7 @@ describe("serverless web constructs", () => {
       userPool,
       userPoolClient,
       roboticBucket: new s3.Bucket(testStack, "Bucket"),
+      internalRobotSecret: "test-internal-secret",
       robotGatewayConstruct: {
         gatewayUrl: "https://gateway.example.test",
         grantInvokeGateway: jest.fn(),

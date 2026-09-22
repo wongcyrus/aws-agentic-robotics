@@ -7,10 +7,15 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as apigatewayv2 from "aws-cdk-lib/aws-apigatewayv2";
-import { Table, AttributeType, BillingMode, ProjectionType } from "aws-cdk-lib/aws-dynamodb";
-import { Runtime } from "aws-cdk-lib/aws-lambda";
+import {
+  Table,
+  AttributeType,
+  BillingMode,
+  ProjectionType,
+  TableEncryption,
+} from "aws-cdk-lib/aws-dynamodb";
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
-import { Duration, Stack, RemovalPolicy, DockerImage } from "aws-cdk-lib";
+import { Duration, Stack, RemovalPolicy } from "aws-cdk-lib";
 import {
   createDestroyableLambdaLogGroup,
   SHARED_PYTHON_RUNTIME,
@@ -20,6 +25,7 @@ import {
 export interface RobotSimulatorServerlessConstructProps {
   userPoolId?: string;
   userPoolClientId?: string;
+  internalRobotSecret?: string;
 }
 
 export class RobotSimulatorServerlessConstruct extends Construct {
@@ -37,6 +43,7 @@ export class RobotSimulatorServerlessConstruct extends Construct {
     // 1. Static Website S3 Bucket
     this.websiteBucket = new s3.Bucket(this, "RobotSimulatorServerlessWebsiteBucket", {
       websiteIndexDocument: "index.html",
+      encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       publicReadAccess: true,
@@ -64,6 +71,7 @@ export class RobotSimulatorServerlessConstruct extends Construct {
     const connectionsTable = new Table(this, "ConnectionsTable", {
       partitionKey: { name: "connection_id", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
+      encryption: TableEncryption.AWS_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
@@ -76,6 +84,7 @@ export class RobotSimulatorServerlessConstruct extends Construct {
     const sessionsTable = new Table(this, "SessionsTable", {
       partitionKey: { name: "session_key", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
+      encryption: TableEncryption.AWS_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
@@ -100,6 +109,7 @@ export class RobotSimulatorServerlessConstruct extends Construct {
         XIAOICE_COMPANY_ID: process.env.XIAOICE_COMPANY_ID || "",
         XIAOICE_PROJECT_ID: process.env.XIAOICE_PROJECT_ID || "",
         XIAOICE_SUBSCRIPTION_KEY: process.env.XIAOICE_SUBSCRIPTION_KEY || "",
+        INTERNAL_ROBOT_SECRET: props.internalRobotSecret || "",
       },
     });
 

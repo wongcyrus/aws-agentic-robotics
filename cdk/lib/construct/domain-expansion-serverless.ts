@@ -1,6 +1,5 @@
 import { Construct } from "constructs";
 import * as path from "path";
-import * as os from "os";
 import * as fs from "fs";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -11,11 +10,16 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as apigatewayv2 from "aws-cdk-lib/aws-apigatewayv2";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
-import { Table, AttributeType, BillingMode, ProjectionType } from "aws-cdk-lib/aws-dynamodb";
-import { Runtime } from "aws-cdk-lib/aws-lambda";
+import {
+  Table,
+  AttributeType,
+  BillingMode,
+  ProjectionType,
+  TableEncryption,
+} from "aws-cdk-lib/aws-dynamodb";
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
 import { Platform } from "aws-cdk-lib/aws-ecr-assets";
-import { Duration, Stack, RemovalPolicy, DockerImage } from "aws-cdk-lib";
+import { Duration, Stack, RemovalPolicy } from "aws-cdk-lib";
 import { UserPool, UserPoolClient } from "aws-cdk-lib/aws-cognito";
 import { DatabaseConstruct } from "./datebase";
 import { RobotSimulatorServerlessConstruct } from "./robot-simulator-serverless";
@@ -141,6 +145,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
     // 2. Serverless S3 Website Bucket
     this.websiteBucket = new s3.Bucket(this, "DomainExpansionWebsiteBucket", {
       websiteIndexDocument: "index.html",
+      encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       publicReadAccess: true,
@@ -169,6 +174,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
       tableName: "DomainExpansionConnections",
       partitionKey: { name: "connection_id", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
+      encryption: TableEncryption.AWS_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
@@ -182,11 +188,13 @@ export class DomainExpansionServerlessConstruct extends Construct {
       tableName: "DomainExpansionSessions",
       partitionKey: { name: "session_id", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
+      encryption: TableEncryption.AWS_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
     // S3 Bucket for Webcam Snaps & AI Portraits with 7-day lifecycle policy
     const photosBucket = new s3.Bucket(this, "DomainExpansionPhotosBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       publicReadAccess: true,

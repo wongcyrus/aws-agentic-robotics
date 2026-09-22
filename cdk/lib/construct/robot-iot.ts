@@ -17,6 +17,7 @@ export class RoboticConstruct extends Construct {
 
     // Example S3 bucket creation
     this.bucket = new s3.Bucket(this, "RoboticBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: false,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,

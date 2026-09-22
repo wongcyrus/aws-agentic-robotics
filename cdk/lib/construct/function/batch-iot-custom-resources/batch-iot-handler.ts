@@ -333,7 +333,7 @@ async function cleanupThingResources(thingName: string): Promise<void> {
             Name: `/${PARAM_PREFIX}/${thingName}/certPem`,
           })
         );
-      } catch (error) {
+      } catch {
         // Parameter might not exist, continue
       }
 
@@ -343,7 +343,7 @@ async function cleanupThingResources(thingName: string): Promise<void> {
             Name: `/${PARAM_PREFIX}/${thingName}/privKey`,
           })
         );
-      } catch (error) {
+      } catch {
         // Parameter might not exist, continue
       }
     }

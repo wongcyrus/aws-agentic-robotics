@@ -6,54 +6,87 @@ import base64
 import io
 import boto3
 from decimal import Decimal
-from boto3.dynamodb.conditions import Key
 from PIL import Image
-from typing import Dict, Any, Optional
 
-def invoke_agentcore_gateway_tool(tool_name: str, arguments: dict):
+from http_request import (
+    JSON_HEADERS,
+    LiveStatusRequest,
+    build_commentary_prompt,
+    build_technique_plan,
+    normalize_session_id,
+    parse_json_body,
+    snapshot_role_key,
+    summarize_event,
+)
+from observability import Metric, MetricsEmitter
+from websocket_handler import handle_websocket_event
+
+
+metrics = MetricsEmitter()
+
+
+def invoke_agentcore_gateway_tool(
+    tool_name: str,
+    arguments: dict,
+    *,
+    gateway_url: str | None = None,
+    session_factory=None,
+    http_post=None,
+    metrics_emitter: MetricsEmitter = metrics,
+):
     """Invoke a tool exposed by the Bedrock AgentCore Gateway using AWS SigV4."""
-    gateway_url = os.environ.get("McpServerGatewayUrl", "").strip()
+    gateway_url = (
+        os.environ.get("McpServerGatewayUrl", "").strip()
+        if gateway_url is None
+        else gateway_url.strip()
+    )
     if not gateway_url:
         return
-        
+
     try:
         import requests
-        import urllib.parse
         from botocore.auth import SigV4Auth
         from botocore.awsrequest import AWSRequest
         from botocore.session import Session
-        
-        session = Session()
-        credentials = session.get_credentials().get_frozen_credentials()
-        region = session.get_config_variable('region') or os.environ.get("AWS_REGION", "us-east-1")
-        
-        payload = json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments
+
+        session = (session_factory or Session)()
+        resolved_credentials = session.get_credentials()
+        if resolved_credentials is None:
+            raise RuntimeError("AWS credentials are required for AgentCore gateway calls")
+        credentials = resolved_credentials.get_frozen_credentials()
+        region = session.get_config_variable("region") or os.environ.get(
+            "AWS_REGION", "us-east-1"
+        )
+
+        payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
             }
-        }).encode('utf-8')
-        
+        ).encode("utf-8")
+
         post_request = AWSRequest(method="POST", url=gateway_url, data=payload)
         SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(post_request)
-        
+
         headers = dict(post_request.headers)
-        headers['Content-Type'] = 'application/json'
-        headers['Accept'] = 'application/json'
-        
-        post_response = requests.post(gateway_url, data=payload, headers=headers, timeout=15)
-        
-        if post_response.status_code == 200:
-            logger.info(f"AgentCore gateway invocation successful for tool: {tool_name}")
-            return post_response.text
-        else:
-            logger.error(f"AgentCore gateway tool call failed: {post_response.status_code} {post_response.text}")
-            
-    except Exception as e:
-        logger.error(f"Failed to invoke AgentCore gateway tool {tool_name}: {e}")
+        headers["Content-Type"] = "application/json"
+        headers["Accept"] = "application/json"
+
+        post_response = (http_post or requests.post)(
+            gateway_url, data=payload, headers=headers, timeout=15
+        )
+        if post_response.status_code != 200:
+            raise RuntimeError(
+                f"AgentCore gateway returned HTTP {post_response.status_code}"
+            )
+        logger.info("AgentCore gateway invocation successful for tool: %s", tool_name)
+        return post_response.text
+    except Exception:
+        metrics_emitter.emit(Metric("AgentCoreGatewayFailure"), tool=tool_name)
+        logger.exception("Failed to invoke AgentCore gateway tool %s", tool_name)
+        raise
 
 # Configure Logger
 logger = logging.getLogger()
@@ -62,9 +95,22 @@ logger.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), lo
 connections_table_name = os.environ.get("CONNECTIONS_TABLE", "DomainExpansionConnections")
 sessions_table_name = os.environ.get("SESSIONS_TABLE", "DomainExpansionSessions")
 
-dynamodb = boto3.resource("dynamodb")
-connections_table = dynamodb.Table(connections_table_name)
-sessions_table = dynamodb.Table(sessions_table_name)
+connections_table = None
+sessions_table = None
+
+
+def get_connections_table():
+    global connections_table
+    if connections_table is None:
+        connections_table = boto3.resource("dynamodb").Table(connections_table_name)
+    return connections_table
+
+
+def get_sessions_table():
+    global sessions_table
+    if sessions_table is None:
+        sessions_table = boto3.resource("dynamodb").Table(sessions_table_name)
+    return sessions_table
 
 # Agent Configuration Defaults
 DEFAULT_AGENT_TYPE = os.environ.get("AGENT_TYPE", "agentcore_runtime")
@@ -113,8 +159,15 @@ def dispatch_event(
     sqs_handler=None,
     websocket_handler=None,
     http_handler=None,
+    metrics_emitter: MetricsEmitter = metrics,
 ):
-    logger.info(f"Incoming Event: {json.dumps(event)}")
+    logger.info("Incoming event: %s", summarize_event(event))
+    if not isinstance(event, dict):
+        return {
+            "statusCode": 400,
+            "headers": JSON_HEADERS,
+            "body": json.dumps({"error": "Event must be a JSON object"}),
+        }
     
     # 0. Check for API Gateway Custom Authorizer REQUEST payload
     if event.get("type") == "REQUEST" and "methodArn" in event:
@@ -134,8 +187,9 @@ def dispatch_event(
             if record.get("eventSource") == "aws:sqs":
                 try:
                     sqs_handler(record)
-                except Exception as e:
-                    logger.error(f"SQS generation failed: {e}")
+                except Exception:
+                    metrics_emitter.emit(Metric("SqsImageGenerationFailure"))
+                    logger.exception("SQS generation failed")
         return {"statusCode": 200, "body": "SQS Records processed."}
     
     # 2. Detect WebSocket API Gateway connection
@@ -154,211 +208,17 @@ def lambda_handler(event, context):
 
 # WebSocket API Handler
 def handle_websocket(event, r_ctx):
-    connection_id = r_ctx.get("connectionId")
-    route_key = r_ctx.get("routeKey")
-    logger.info(f"WebSocket Connection ID: {connection_id}, Route Key: {route_key}")
-
-    # Initialize API Gateway Management client to send messages back
     domain = r_ctx.get("domainName")
     stage = r_ctx.get("stage")
     ws_endpoint = f"https://{domain}/{stage}"
-    apigw_client = boto3.client("apigatewaymanagementapi", endpoint_url=ws_endpoint)
-
-    def post_to_conn(target_conn_id, data):
-        try:
-            apigw_client.post_to_connection(
-                ConnectionId=target_conn_id,
-                Data=json.dumps(data)
-            )
-        except Exception as e:
-            logger.warning(f"Could not post to connection {target_conn_id}: {e}")
-
-    def query_room_connections(room_code):
-        try:
-            # Query index RoomCodeIndex
-            response = connections_table.query(
-                IndexName="RoomCodeIndex",
-                KeyConditionExpression=Key("room_code").eq(room_code)
-            )
-            return response.get("Items", [])
-        except Exception as e:
-            logger.error(f"Error querying room connections: {e}")
-            return []
-
-    if route_key == "$connect":
-        logger.info(f"Client connected: {connection_id}")
-        return {"statusCode": 200, "body": "Connected."}
-
-    elif route_key == "$disconnect":
-        logger.info(f"Client disconnected: {connection_id}")
-        # Look up room code before deletion
-        try:
-            record_resp = connections_table.get_item(Key={"connection_id": connection_id})
-            record = record_resp.get("Item")
-            if record:
-                room_code = record.get("room_code")
-                client_id = record.get("client_id")
-                role = record.get("role")
-                
-                # Delete connection
-                connections_table.delete_item(Key={"connection_id": connection_id})
-                
-                # Broadcast departure
-                room_conns = query_room_connections(room_code)
-                for conn in room_conns:
-                    target_id = conn.get("connection_id")
-                    if target_id != connection_id:
-                        post_to_conn(target_id, {
-                            "type": "user_left",
-                            "data": {
-                                "id": client_id,
-                                "role": role
-                            }
-                        })
-        except Exception as e:
-            logger.error(f"Error during disconnect cleanup: {e}")
-        return {"statusCode": 200, "body": "Disconnected."}
-
-    # Custom WebSocket action handler
-    try:
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")
-        logger.info(f"WebSocket custom action parsed: {action}")
-
-        if action == "join_room":
-            room_code = body.get("roomCode", "BTL1")
-            role = body.get("role", "viewer")
-            client_id = body.get("client_id", "anonymous")
-
-            # Save connection mapping
-            connections_table.put_item(
-                Item={
-                    "connection_id": connection_id,
-                    "client_id": client_id,
-                    "room_code": room_code,
-                    "role": role,
-                    "created_at": int(time.time())
-                }
-            )
-            logger.info(f"Saved connection mapping: {connection_id} -> Room: {room_code}, Role: {role}")
-
-            # Notify all other room participants
-            room_conns = query_room_connections(room_code)
-            for conn in room_conns:
-                target_id = conn.get("connection_id")
-                if target_id != connection_id:
-                    post_to_conn(target_id, {
-                        "type": "user_joined",
-                        "data": {
-                            "id": client_id,
-                            "role": role
-                        }
-                    })
-
-        elif action == "signal":
-            sig_type = body.get("type")
-            sig_data = body.get("data")
-            to_client = body.get("to")
-
-            # Find sender's parameters
-            sender_resp = connections_table.get_item(Key={"connection_id": connection_id})
-            sender = sender_resp.get("Item")
-            if not sender:
-                logger.warning(f"Sender connection mapping missing: {connection_id}")
-                return {"statusCode": 404, "body": "Sender missing"}
-
-            sender_id = sender.get("client_id")
-            sender_role = sender.get("role")
-            room_code = sender.get("room_code")
-
-            payload = {
-                "type": "signal",
-                "data": {
-                    "from": sender_id,
-                    "role": sender_role,
-                    "type": sig_type,
-                    "data": sig_data
-                }
-            }
-
-            if to_client:
-                # Direct Unicast to specified client_id
-                room_conns = query_room_connections(room_code)
-                for conn in room_conns:
-                    if conn.get("client_id") == to_client:
-                        post_to_conn(conn.get("connection_id"), payload)
-            else:
-                # Broadcast to everyone else in the room
-                room_conns = query_room_connections(room_code)
-                for conn in room_conns:
-                    target_id = conn.get("connection_id")
-                    if target_id != connection_id:
-                        post_to_conn(target_id, payload)
-
-    except Exception as e:
-        logger.error(f"WebSocket custom handler failed: {e}")
-        return {"statusCode": 500, "body": f"Error: {e}"}
-
-    return {"statusCode": 200, "body": "OK"}
-
-
-JJK_ACTION_MAP = {
-    "domain_unlimited_void": {
-        "stance": "kung_fu",
-        "speech": "領域展開、無量空処",
-        "language": "ja"
-    },
-    "domain_malevolent_shrine": {
-        "stance": "right_uppercut",
-        "speech": "領域展開、伏魔御厨子",
-        "language": "ja"
-    },
-    "domain_self_embodiment": {
-        "stance": "twist",
-        "speech": "領域展開、自閉円頓裹",
-        "language": "ja"
-    },
-    "domain_authentic_love": {
-        "stance": "wave",
-        "speech": "領域展開、真贋相愛",
-        "language": "ja"
-    },
-    "domain_idle_death_gamble": {
-        "stance": "dance",
-        "speech": "領域展開、坐殺博徒",
-        "language": "ja"
-    },
-    "domain_yuji_itadori": {
-        "stance": "punch",
-        "speech": "領域展開",
-        "language": "ja"
-    },
-    "domain_chimera_shadow_garden": {
-        "stance": "squat",
-        "speech": "領域展開、嵌合暗翳庭",
-        "language": "ja"
-    },
-    "domain_time_cell_moon_palace": {
-        "stance": "twist",
-        "speech": "領域展開、時胞月宮殿",
-        "language": "ja"
-    },
-    "lapse_blue": {
-        "stance": "left_shot_fast",
-        "speech": "術式順転、蒼",
-        "language": "ja"
-    },
-    "reversal_red": {
-        "stance": "right_shot_fast",
-        "speech": "術式反転、赫",
-        "language": "ja"
-    },
-    "hollow_purple": {
-        "stance": "kick",
-        "speech": "虚式、茈",
-        "language": "ja"
-    }
-}
+    return handle_websocket_event(
+        event,
+        r_ctx,
+        connections_table=get_connections_table(),
+        api_client=boto3.client("apigatewaymanagementapi", endpoint_url=ws_endpoint),
+        logger=logger,
+        metrics=metrics,
+    )
 
 
 # HTTP REST API Handler
@@ -368,12 +228,7 @@ def handle_http(event):
     logger.info(f"REST Route: {method} {path}")
 
     # Standard JSON CORS Headers
-    headers = {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST,GET,OPTIONS"
-    }
+    headers = JSON_HEADERS
 
     if method == "OPTIONS":
         return {"statusCode": 200, "headers": headers, "body": ""}
@@ -394,18 +249,11 @@ def handle_http(event):
         except Exception:
             return False
 
-    try:
-        body = json.loads(event.get("body", "{}")) if event.get("body") else {}
-    except Exception:
-        body = {}
+    body = parse_json_body(event)
 
     # Endpoint: /api/enhance-portrait (POST)
     if path == "/api/enhance-portrait" and method == "POST":
-        session_id = body.get("sessionId", "mcpserver")
-        if not session_id or not isinstance(session_id, str) or not session_id.strip():
-            session_id = "mcpserver"
-        else:
-            session_id = session_id.strip()
+        session_id = normalize_session_id(body.get("sessionId", "mcpserver"))
             
         template_id = body.get("templateId", "random")
         logger.info(f"Enhance portrait triggered: session={session_id}, template={template_id}")
@@ -421,7 +269,7 @@ def handle_http(event):
         disabled_status = "ERROR: AWS_IMAGE_GENERATION_DISABLED"
 
         try:
-            sessions_table.update_item(
+            get_sessions_table().update_item(
                 Key={"session_id": session_id},
                 UpdateExpression="SET enhanced_image_url = :status, updated_at = :t",
                 ExpressionAttributeValues={
@@ -442,16 +290,12 @@ def handle_http(event):
     # Endpoint: /api/check-enhancement (GET)
     elif path == "/api/check-enhancement" and method == "GET":
         q_params = event.get("queryStringParameters", {}) or {}
-        session_id = q_params.get("sessionId", "mcpserver")
-        if not session_id or not isinstance(session_id, str) or not session_id.strip():
-            session_id = "mcpserver"
-        else:
-            session_id = session_id.strip()
+        session_id = normalize_session_id(q_params.get("sessionId", "mcpserver"))
             
         logger.info(f"Check enhancement status for session={session_id}")
 
         try:
-            resp = sessions_table.get_item(Key={"session_id": session_id})
+            resp = get_sessions_table().get_item(Key={"session_id": session_id})
             item = resp.get("Item", {})
             enhanced_url = item.get("enhanced_image_url", "")
             
@@ -500,7 +344,7 @@ def handle_http(event):
             if not photos_bucket:
                 raise Exception("PHOTOS_S3_BUCKET env variable is missing!")
 
-            role_key = "player1" if role == "player1" else "player2" if role == "player2" else "viewer"
+            role_key = snapshot_role_key(role)
             s3_key = f"webcam_snapshots/{session_id}/{role_key}.jpg"
             
             try:
@@ -543,7 +387,7 @@ def handle_http(event):
         room_code = body.get("roomCode", "BTL1")
         signaling_url = body.get("signalingUrl", "")
 
-        sessions_table.put_item(
+        get_sessions_table().put_item(
             Item={
                 "session_id": session_id,
                 "room_code": room_code,
@@ -575,7 +419,7 @@ def handle_http(event):
             if not photos_bucket:
                 raise Exception("PHOTOS_S3_BUCKET is missing! S3 storage is required.")
 
-            role_key = "player1" if role == "player1" else "player2" if role == "player2" else "viewer"
+            role_key = snapshot_role_key(role)
             s3_key = f"webcam_snapshots/{session_id}/{role_key}.jpg"
             
             # Write raw image binary directly to S3 bucket
@@ -590,7 +434,7 @@ def handle_http(event):
             logger.info(f"Successfully saved webcam frame directly to S3 (no DynamoDB storage): {img_url}")
 
             # Keep DynamoDB record thin - only update the updated_at timestamp!
-            sessions_table.update_item(
+            get_sessions_table().update_item(
                 Key={"session_id": session_id},
                 UpdateExpression="SET updated_at = :t",
                 ExpressionAttributeValues={
@@ -632,7 +476,7 @@ def handle_http(event):
             if not photos_bucket:
                 raise Exception("PHOTOS_S3_BUCKET is missing!")
 
-            role_key = "player1" if role == "player1" else "player2" if role == "player2" else "viewer"
+            role_key = snapshot_role_key(role)
             s3_key = f"webcam_snapshots/{session_id}/{role_key}.jpg"
 
             # Check S3 directly!
@@ -674,106 +518,26 @@ def handle_http(event):
         from commentary import translate_detail, generate_ai_commentary
         from commentary_tts import synthesize_commentary_audio
         
-        session_id = body.get("sessionId", "mcpserver")
-        room_code = body.get("roomCode", "BTL1")
-        p1_score = body.get("p1Score", 0)
-        p2_score = body.get("p2Score", 0)
-        text_event = body.get("text") or body.get("detail") or ""
-        event_type = body.get("eventType", "")
-        agent_image_policy = body.get("agentImagePolicy", "always")
-        foul_language = bool(body.get("foulLanguage", False))
-        requested_tts_mode = str(body.get("ttsMode", "browser")).strip().lower()
-        if requested_tts_mode not in {"browser", "aws"}:
-            requested_tts_mode = "browser"
-        commentary_language = body.get("lang", "en")
-        is_reset = bool(body.get("isReset", False)) or event_type == "RESET" or path == "/api/battle-result"
+        live_request = LiveStatusRequest.from_body(body, path, DEFAULT_AGENT_TYPE)
+        session_id = live_request.session_id
+        event_type = live_request.event_type
+        agent_image_policy = live_request.agent_image_policy
+        requested_tts_mode = live_request.requested_tts_mode
+        commentary_language = live_request.commentary_language
+        is_reset = live_request.is_reset
 
         logger.info(
-            f"Live-status: session={session_id}, eventType={event_type}, event={text_event}, "
-            f"reset={is_reset}, policy={agent_image_policy}, foul={foul_language}"
+            "Live-status session=%s eventType=%s reset=%s policy=%s foul=%s",
+            session_id,
+            event_type,
+            is_reset,
+            agent_image_policy,
+            live_request.foul_language,
         )
 
         # Execute localized JJK translation
-        translated_event = translate_detail(text_event)
-        tone_directive = (
-            "Swearing / trash-talk mode is ACTIVE. You may use sharp Cantonese vulgarities or hard roasts if it fits Nobara's voice."
-            if foul_language else
-            "Swearing / foul language is STRICTLY FORBIDDEN and OFF (FOUL PROTECTION IS ACTIVE). "
-            "You must keep the commentary completely clean, family-friendly, and strictly PG-rated. "
-            "You are absolutely prohibited from using any Cantonese vulgarities, swear words, profanities, or offensive slang "
-            "including but not limited to: 仆街 (puk gaai), 屌 (diu), 頂你個肺 (ding nei go fai), 戇尻/戇鳩/戇c (on gau), 柒/𨳍 (cat), 撚/𨶙 (lan), 閪/閪人 (hai), 冚家鏟, 廢柴, or any euphemisms/homophones of these words (such as 玩撚, 含撚, 傻西, 傻嗨, 小你, 頂你). "
-            "Do not use any English profanity or curse words (e.g., fuck, shit, bitch, damn, hell, crap, asshole). "
-            "Your roasts must be creative, humorous, and sassy without resorting to any vulgarity or abusive insults. "
-            "Perform a strict self-censorship check on your output to ensure 100% compliance."
-        )
-
-        # Build prompt content block
-        if path == "/api/battle-result":
-            content_block = f"""
-[BATTLE CONCLUSION TRIGGERED]
-Final Match Results:
-- Player 1 Score: {p1_score} points
-- Player 2 Score: {p2_score} points
-Summary description of final action: {translated_event}
-Tone rule: {tone_directive}
-
-If player snapshots are attached, do NOT explain, analyze, or describe the images first. Do NOT output any introductory description of what you see in the images. Incorporate any visual details or roasts silently and naturally into your final commentary dialogue. Give a spectacular, sass-filled, high-octane commentary conclusion. Declare the victor or roast them both if it's a draw. Be Kugisaki Nobara, feisty and fashionable! Keep it to 2 sentences!
-"""
-        elif is_reset:
-            content_block = f"""
-[MATCH INITIAL GREETING]
-Tone rule: {tone_directive}
-Introduce yourself as the supreme JJK Commentator (Kugisaki Nobara). Give a high-energy, confident greeting to the competitors starting their duel in Room {room_code}. The match has NOT started yet, so make this a pre-battle hype introduction before the countdown begins. If player snapshots are attached, do NOT explain, analyze, or describe the images first. Do NOT output any scaffolding (such as 'I can see the snapshots' or 'From P1's image'). Naturally and silently incorporate one or two specific visible details about each player's expression, stance, outfit, or readiness directly into your roleplay introduction dialogue. Tell them to prepare their cursed energy. Sassy, feisty, stylish! Keep it to 2 short sentences!
-"""
-        else:
-            content_block = f"""
-[MID-MATCH EVENT ENCOUNTERED]
-Current Scores:
-- Player 1 Score: {p1_score}
-- Player 2 Score: {p2_score}
-Latest Match Action: {translated_event}
-Tone rule: {tone_directive}
-
-If player snapshots are attached, do NOT explain, analyze, or describe the images first. Do NOT output any introductory text or scaffolding about what you see in the images. React instantly to this specific action! Give sassy, feisty sorcerer trash-talk or hype up the battle with extreme energy. Speak directly to them like an arrogant fashion-lover. Keep it to 2 short, punchy sentences max!
-"""
-
-        # Select language directive
-        lang_directives = {
-            "zh-HK": (
-                "IMPORTANT LANGUAGE CONSTRAINT: You must output the entire response in a hybrid of energetic Cantonese (廣東話) "
-                "with occasional sassy English and Japanese JJK terms. Format strictly in traditional Chinese characters with "
-                "local Hong Kong/Guangdong slang expressions! Do not use simplified characters."
-            ),
-            "zh-TW": (
-                "IMPORTANT LANGUAGE CONSTRAINT: You must output the entire response in a hybrid of energetic Traditional Chinese (繁體中文) "
-                "with Taiwan slang/idioms. Do not use simplified characters."
-            ),
-            "ja": (
-                "IMPORTANT LANGUAGE CONSTRAINT: You must output the entire response in natural, energetic, sassy Japanese (日本語) "
-                "with occasional English/JJK terminology. Format strictly in standard Japanese text."
-            ),
-            "en": (
-                "IMPORTANT LANGUAGE CONSTRAINT: You must output the entire response in natural, energetic, sassy English (英語) "
-                "with standard JJK terms. Do not use Chinese characters."
-            )
-        }
-        
-        lang_directive = lang_directives.get(commentary_language)
-        if not lang_directive:
-            if commentary_language.startswith("zh"):
-                lang_directive = lang_directives["zh-HK"]
-            elif commentary_language.startswith("ja"):
-                lang_directive = lang_directives["ja"]
-            else:
-                lang_directive = lang_directives["en"]
-                
-        formatting_directive = (
-            "CRITICAL FORMATTING CONSTRAINT: Output ONLY the direct match commentary dialogue "
-            "as Kugisaki Nobara. Do NOT write any introductory analysis, do NOT explain what you "
-            "see in the snapshots, do NOT think out loud, and do NOT output any conversational scaffolding "
-            "(such as 'Now let me provide...' or 'From the images...'). Start directly with the commentary."
-        )
-        content_block = content_block.strip() + f"\n\n{lang_directive}\n\n{formatting_directive}"
+        translated_event = translate_detail(live_request.text_event)
+        content_block = build_commentary_prompt(live_request, translated_event)
 
         # Try to retrieve the latest webcam frames for multimodal analysis
         image_bytes_p1 = None
@@ -784,11 +548,7 @@ If player snapshots are attached, do NOT explain, analyze, or describe the image
         image_base64_p2 = ""
         
         # Decide if we should attach image based on policy
-        should_attach_image = False
-        if agent_image_policy == "always":
-            should_attach_image = True
-        elif agent_image_policy == "start_end":
-            should_attach_image = is_reset or path == "/api/battle-result"
+        should_attach_image = live_request.should_attach_image
 
         if should_attach_image:
             try:
@@ -823,7 +583,7 @@ If player snapshots are attached, do NOT explain, analyze, or describe the image
                 logger.warning(f"Failed to fetch session webcam frames from S3 for Bedrock: {e}")
 
         # Resolve Commentary Engine
-        agent_engine = body.get("agent_type", DEFAULT_AGENT_TYPE)
+        agent_engine = live_request.agent_engine
         logger.info(f"Invoking Commentary Engine: {agent_engine}")
 
         commentary_text = generate_ai_commentary(
@@ -888,65 +648,27 @@ If player snapshots are attached, do NOT explain, analyze, or describe the image
 
     # Endpoint: /api/trigger-technique
     elif path == "/api/trigger-technique" and method == "POST":
-        technique = body.get("technique", "")
-        robot_id = body.get("robotId", "robot_1")
-        role = body.get("role", "none")
-        
-        # 1. Resolve target robots
-        targets = []
-        if robot_id == "all":
-            if role == "player1":
-                targets = ["robot_1", "robot_2", "robot_3"]
-            elif role == "player2":
-                targets = ["robot_4", "robot_5", "robot_6"]
-            else:
-                targets = ["robot_1"]
-        else:
-            targets = [robot_id]
-
-        # 2. Match technique against JJK_ACTION_MAP
-        map_info = JJK_ACTION_MAP.get(technique)
-        stance = map_info["stance"] if map_info else technique
-        speech = map_info["speech"] if map_info else None
-        language = map_info.get("language", "ja") if map_info else "ja"
+        plan = build_technique_plan(body)
 
         # 3. Trigger physical action and AWS Polly voice concurrently for all targets
         triggered_targets = []
 
-        # Map JJK technique directly to the exact existing MCP tool API
-        technique_to_mcp_tool = {
-            "domain_unlimited_void": "robot_kung_fu",
-            "domain_malevolent_shrine": "robot_right_uppercut",
-            "domain_self_embodiment": "robot_twist",
-            "domain_authentic_love": "robot_wave",
-            "domain_idle_death_gamble": "robot_left_uppercut",
-            "domain_yuji_itadori": "robot_sit_ups",
-            "domain_chimera_shadow_garden": "robot_squat",
-            "domain_time_cell_moon_palace": "robot_twist",
-            "lapse_blue": "robot_left_shot_fast",
-            "reversal_red": "robot_right_shot_fast",
-            "hollow_purple": "robot_left_kick"
-        }
-
-        for target in targets:
-            # Resolve the specific existing MCP tool name directly from the technique
-            mcp_tool_name = technique_to_mcp_tool.get(technique, f"robot_{technique}")
-
+        for target in plan.targets:
             # B. Trigger Speak/Polly synthesizer via AgentCore Gateway
-            if speech:
+            if plan.speech:
                 invoke_agentcore_gateway_tool(
                     tool_name="robot-only-mcp-lambda___robot_speak",
                     arguments={
                         "robot_id": target,
-                        "text": speech,
-                        "language": language
+                        "text": plan.speech,
+                        "language": plan.language
                     }
                 )
 
             # A. Trigger Robot Action via AgentCore Gateway
-            if mcp_tool_name:
+            if plan.mcp_tool_name:
                 invoke_agentcore_gateway_tool(
-                    tool_name=f"robot-only-mcp-lambda___{mcp_tool_name}",
+                    tool_name=f"robot-only-mcp-lambda___{plan.mcp_tool_name}",
                     arguments={
                         "robot_id": target
                     }
@@ -958,10 +680,10 @@ If player snapshots are attached, do NOT explain, analyze, or describe the image
             "headers": headers,
             "body": json.dumps({
                 "success": len(triggered_targets) > 0,
-                "targets": targets,
+                "targets": plan.targets,
                 "triggered_targets": triggered_targets,
-                "action": stance,
-                "speech_triggered": bool(speech)
+                "action": plan.stance,
+                "speech_triggered": bool(plan.speech)
             })
         }
 

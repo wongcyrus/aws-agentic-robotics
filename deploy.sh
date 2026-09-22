@@ -3,6 +3,48 @@ set -euo pipefail
 
 # Fix Docker credential helper issue that occurs in dev containers
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECK_HEALTH=false
+CHECK_AGENTCORE=false
+CHECK_TIMEOUT=20
+
+usage() {
+    cat <<'EOF'
+Usage: ./deploy.sh [--check-health] [--check-agentcore] [--check-timeout SECONDS]
+
+Post-deploy checks are disabled unless explicitly requested.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --check-health)
+            CHECK_HEALTH=true
+            shift
+            ;;
+        --check-agentcore)
+            CHECK_AGENTCORE=true
+            shift
+            ;;
+        --check-timeout)
+            if [[ $# -lt 2 || ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+                echo "❌ Error: --check-timeout requires a positive integer." >&2
+                exit 2
+            fi
+            CHECK_TIMEOUT=$2
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "❌ Error: unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
 bash "${SCRIPT_DIR}/fix_docker_credentials.sh"
 
 # Redirect all stdout and stderr to both the console and deploy.log
@@ -37,7 +79,12 @@ AWS_USER_ID=$(echo "$AWS_IDENTITY_OUT" | jq -r .UserId 2>/dev/null || aws sts ge
 
 cd cdk
 npx cdk deploy AwsAgenticRobotics --require-approval never --outputs-file output.json --context AwsUserId="$AWS_USER_ID"
+"${SCRIPT_DIR}/scripts/deployment/validate_cdk_output.sh" output.json \
+    --require RobotDataBucketName \
+    --require ServerlessWebsiteBucket \
+    --require DomainExpansionWebsiteBucket
 jq -S . output.json > output.sorted.json && mv output.sorted.json output.json
+
 BUCKET=$(jq -r '.[].RobotDataBucketName' output.json)
 aws s3 sync s3://"$BUCKET"/iot-certificates/ ../robot_client/certificates
 
@@ -46,3 +93,12 @@ aws s3 sync ../humanoid-robot-simulator-serverless/frontend/video s3://"$WEBSITE
 
 DOMAIN_WEBSITE_BUCKET=$(jq -r '.[].DomainExpansionWebsiteBucket' output.json)
 aws s3 sync ../domain-expansion-ar-game/static/video s3://"$DOMAIN_WEBSITE_BUCKET"/static/video
+
+post_deploy_args=(output.json --timeout "$CHECK_TIMEOUT")
+if [[ "$CHECK_HEALTH" == true ]]; then
+    post_deploy_args+=(--health)
+fi
+if [[ "$CHECK_AGENTCORE" == true ]]; then
+    post_deploy_args+=(--agentcore)
+fi
+"${SCRIPT_DIR}/scripts/deployment/post_deploy_checks.sh" "${post_deploy_args[@]}"

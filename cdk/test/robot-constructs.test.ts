@@ -25,6 +25,17 @@ describe("robot infrastructure constructs", () => {
     template.hasResource("AWS::S3::Bucket", {
       DeletionPolicy: "Delete",
       UpdateReplacePolicy: "Delete",
+      Properties: {
+        BucketEncryption: {
+          ServerSideEncryptionConfiguration: [
+            {
+              ServerSideEncryptionByDefault: {
+                SSEAlgorithm: "AES256",
+              },
+            },
+          ],
+        },
+      },
     });
     template.hasResourceProperties("AWS::IAM::User", {
       UserName: "AmazonNovaRoboticsIoTRobotUser",

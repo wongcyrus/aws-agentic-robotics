@@ -1,0 +1,13 @@
+[run]
+branch = True
+
+[report]
+omit =
+    */tests/*
+    */test/*
+    */create_user.py
+    */generate_keys.py
+    */update_simple_commands.py
+    */command_config/*
+    */config_dir/*
+show_missing = True

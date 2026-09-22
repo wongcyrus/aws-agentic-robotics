@@ -10,8 +10,14 @@ import { RobotSsmConstruct } from "./construct/robot-ssm";
 import { SsmUserConstruct } from "./construct/ssm-user";
 import { DatabaseConstruct } from "./construct/datebase";
 import { RobotSimulatorServerlessConstruct } from "./construct/robot-simulator-serverless";
-import { AttributeType, Billing, TableV2 } from "aws-cdk-lib/aws-dynamodb";
+import {
+  AttributeType,
+  Billing,
+  TableEncryptionV2,
+  TableV2,
+} from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Authenticator } from "./construct/authenticator";
 import { DomainExpansionServerlessConstruct } from "./construct/domain-expansion-serverless";
 import { RobotToolGatewayConstruct } from "./construct/robot-tool-gateway";
@@ -39,7 +45,20 @@ export class AwsAgenticRoboticsStack extends cdk.Stack {
 
     const databaseConstruct = new DatabaseConstruct(this, "DatabaseConstruct");
 
-
+    const internalRobotSecret = new secretsmanager.Secret(
+      this,
+      "InternalRobotSecret",
+      {
+        description:
+          "Shared authentication secret for simulator-to-text-control requests",
+        generateSecretString: {
+          excludePunctuation: true,
+          passwordLength: 48,
+        },
+      }
+    );
+    const internalRobotSecretValue =
+      internalRobotSecret.secretValue.unsafeUnwrap();
 
     // Create the new serverless robot simulator construct side-by-side
     const humanoidRobotSimulatorServerlessConstruct = new RobotSimulatorServerlessConstruct(
@@ -48,6 +67,7 @@ export class AwsAgenticRoboticsStack extends cdk.Stack {
       {
         userPoolId: authenticator.userPool.userPoolId,
         userPoolClientId: authenticator.userPoolClient.userPoolClientId,
+        internalRobotSecret: internalRobotSecretValue,
       }
     );
 
@@ -57,6 +77,7 @@ export class AwsAgenticRoboticsStack extends cdk.Stack {
         type: AttributeType.STRING,
       },
       billing: Billing.onDemand(),
+      encryption: TableEncryptionV2.awsManagedKey(),
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: false,
@@ -72,6 +93,7 @@ export class AwsAgenticRoboticsStack extends cdk.Stack {
 
     const mediaBucket = new s3.Bucket(this, "RobotMediaBucket", {
       websiteIndexDocument: "index.html",
+      encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: false,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
@@ -167,6 +189,7 @@ const textControlWebConstruct = new TextControlWebConstruct(
     userPool: authenticator.userPool,
     userPoolClient: authenticator.userPoolClient,
     roboticBucket: roboticConstruct.bucket,
+    internalRobotSecret: internalRobotSecretValue,
   }
 );
 

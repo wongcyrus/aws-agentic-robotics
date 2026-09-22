@@ -1,6 +1,5 @@
 import { RestApi, LambdaIntegration } from "aws-cdk-lib/aws-apigateway";
-import { CfnOutput, Duration, DockerImage, RemovalPolicy, SecretValue } from "aws-cdk-lib";
-import * as lambda from "aws-cdk-lib/aws-lambda";
+import { CfnOutput, Duration, RemovalPolicy, SecretValue } from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as fs from "fs";
@@ -31,6 +30,7 @@ export interface TextControlWebConstructProps {
   readonly userPool: UserPool;
   readonly userPoolClient: UserPoolClient;
   readonly roboticBucket: s3.IBucket;
+  readonly internalRobotSecret: string;
 }
 
 export class TextControlWebConstruct extends Construct {
@@ -70,7 +70,7 @@ export class TextControlWebConstruct extends Construct {
     try {
       const secretPath = path.join(__dirname, "../../../text_control/xiaoice_credentials.json");
       xiaoiceSecretValue = fs.readFileSync(secretPath, "utf8");
-    } catch (e) {
+    } catch {
       console.warn("xiaoice_credentials.json not found, using empty object");
     }
 
@@ -101,6 +101,7 @@ export class TextControlWebConstruct extends Construct {
         XIAOICE_SECRET_NAME: xiaoiceCredentialsSecret.secretName,
         SpeechTable: props.speechTable.tableName,
         RobotDataBucketName: props.roboticBucket.bucketName,
+        INTERNAL_ROBOT_SECRET: props.internalRobotSecret,
       },
       bundling: {
         ...SHARED_PYTHON_BUNDLING,
@@ -113,7 +114,7 @@ export class TextControlWebConstruct extends Construct {
         ],
         // Pre-build commands to run before packaging
         commandHooks: {
-          beforeBundling(inputDir: string, outputDir: string): string[] {
+          beforeBundling(inputDir: string, _outputDir: string): string[] {
             return [
               `echo "Running pre-build commands for ${inputDir}"`,
               `cd ${inputDir}`,

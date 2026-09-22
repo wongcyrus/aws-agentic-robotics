@@ -2,7 +2,9 @@
 Middleware for JWT token validation and API Gateway authentication context
 """
 
+import hmac
 import inspect
+import logging
 import os
 from functools import wraps
 
@@ -12,6 +14,8 @@ from flask import g, jsonify, redirect, request, session, url_for
 from jwt.exceptions import InvalidTokenError
 
 from config import COGNITO_CLIENT_ID, COGNITO_USER_POOL_ID
+
+logger = logging.getLogger(__name__)
 
 # Configuration settings
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
@@ -68,10 +72,24 @@ def validate_jwt_token(token):
 
         return payload
 
-    except InvalidTokenError:
+    except (InvalidTokenError, KeyError, TypeError, ValueError):
         return None
-    except Exception:  # pylint: disable=broad-exception-caught
+    except requests.RequestException:
+        logger.exception("Unable to retrieve Cognito signing keys")
         return None
+    except Exception:
+        logger.exception("Unexpected JWT validation failure")
+        return None
+
+
+def has_valid_internal_secret(provided_secret):
+    """Validate the optional service-to-service secret without a built-in bypass."""
+    configured_secret = os.getenv("INTERNAL_ROBOT_SECRET", "")
+    return bool(
+        configured_secret
+        and provided_secret
+        and hmac.compare_digest(provided_secret, configured_secret)
+    )
 
 
 def extract_api_gateway_auth_context():
@@ -95,16 +113,13 @@ def extract_api_gateway_auth_context():
 def require_hybrid_auth(f):
     """Decorator that supports session-based (web), token-based (API), and internal secret (M2M) authentication"""
     
-    # Internal secret for service-to-service communication
-    INTERNAL_SECRET = os.getenv("INTERNAL_ROBOT_SECRET", "hktiit_robot_internal_bypass_2026")
-
     if inspect.iscoroutinefunction(f):
 
         @wraps(f)
         async def async_decorated_function(*args, **kwargs):
             # 1. Try Internal Secret (Fastest for Simulator-to-Robot communication)
             internal_key = request.headers.get("X-Internal-Secret")
-            if internal_key == INTERNAL_SECRET:
+            if has_valid_internal_secret(internal_key):
                 g.current_user = {"username": "internal_system", "roles": ["admin"]}
                 return await f(*args, **kwargs)
 
@@ -137,7 +152,7 @@ def require_hybrid_auth(f):
     def sync_decorated_function(*args, **kwargs):
         # 1. Try Internal Secret (Fastest for Simulator-to-Robot communication)
         internal_key = request.headers.get("X-Internal-Secret")
-        if internal_key == INTERNAL_SECRET:
+        if has_valid_internal_secret(internal_key):
             g.current_user = {"username": "internal_system", "roles": ["admin"]}
             return f(*args, **kwargs)
 

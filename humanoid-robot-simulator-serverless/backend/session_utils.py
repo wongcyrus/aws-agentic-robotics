@@ -90,9 +90,12 @@ def send_request(method: str, robot_id: str, action: str) -> Optional[Dict[str, 
     target_url = f"{api_url.rstrip('/')}/{robot_id.lstrip('/')}"
     data = {"method": method, "action": hardware_action}
     
-    INTERNAL_SECRET = os.getenv("INTERNAL_ROBOT_SECRET", "hktiit_robot_internal_bypass_2026")
+    internal_secret = os.getenv("INTERNAL_ROBOT_SECRET", "")
+    if not internal_secret:
+        logger.error("❌ INTERNAL_ROBOT_SECRET is not configured. Cannot call real robot.")
+        return None
     headers = {
-        "X-Internal-Secret": INTERNAL_SECRET,
+        "X-Internal-Secret": internal_secret,
         "Content-Type": "application/json"
     }
     

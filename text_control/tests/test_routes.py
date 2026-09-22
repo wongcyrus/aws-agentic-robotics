@@ -30,7 +30,7 @@ def client(app):
 
 @pytest.fixture
 def internal_headers():
-    return {"X-Internal-Secret": "hktiit_robot_internal_bypass_2026"}
+    return {"X-Internal-Secret": "test-internal-secret"}
 
 
 def test_robot_crud_routes(client, internal_headers, monkeypatch):

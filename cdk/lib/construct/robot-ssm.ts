@@ -88,7 +88,7 @@ export class RobotSsmConstruct extends Construct {
       }),
     });
 
-    for (let thingName of props.thingNames) {
+    for (const thingName of props.thingNames) {
       const customResource = new cdk.CustomResource(
         this,
         `SsmCustomResource${thingName}`,

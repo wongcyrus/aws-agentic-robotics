@@ -216,6 +216,15 @@ describe("AwsAgenticRoboticsStack", () => {
       DeletionPolicy: "Delete",
       UpdateReplacePolicy: "Delete",
       Properties: Match.objectLike({
+        BucketEncryption: {
+          ServerSideEncryptionConfiguration: [
+            {
+              ServerSideEncryptionByDefault: {
+                SSEAlgorithm: "AES256",
+              },
+            },
+          ],
+        },
         WebsiteConfiguration: { IndexDocument: "index.html" },
         PublicAccessBlockConfiguration: {
           BlockPublicAcls: true,

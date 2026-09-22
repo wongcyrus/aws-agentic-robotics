@@ -1,0 +1,47 @@
+[project]
+name = "aws-agentic-robotics-development"
+version = "0.0.0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+    "mypy==2.3.1",
+    "ruff==0.16.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "I"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+omit = [
+    "*/tests/*",
+    "*/test/*",
+    "*/create_user.py",
+    "*/generate_keys.py",
+    "*/update_simple_commands.py",
+    "*/command_config/*",
+    "*/config_dir/*",
+]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+disallow_any_generics = true
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true

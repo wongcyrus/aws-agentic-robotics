@@ -3,7 +3,6 @@ API routes - Handles all API endpoints
 """
 
 import asyncio
-import json
 import logging
 import uuid
 from datetime import datetime
@@ -13,9 +12,16 @@ from middleware import require_hybrid_auth
 from services.database_service import delete_robot, get_robot, list_robots, upsert_robot
 from services.speech_db_service import delete_speech_message, get_pending_speech_message
 from services.robot_service import robot_service
+from services.robot_api import ActionRequest, SpeechRequest, extract_mcp_text
+from services.chat_orchestration import (
+    RobotPromptContext,
+    StreamRequest,
+    create_agent_stream,
+)
 from services.strands_service_mcp import create_robot_agent as create_robot_agent_mcp
 from utils.auth import validate_authentication
 from utils.lambda_logger import get_lambda_logger
+from utils.observability import Metric, MetricsEmitter
 from utils.messages import (
     GOODBYE_MESSAGES,
     RECOMMENDED_QUESTIONS,
@@ -34,18 +40,21 @@ logging.getLogger("opentelemetry.context").setLevel(logging.CRITICAL)
 
 # Configure logging for AWS Lambda
 logger = get_lambda_logger(__name__)
+metrics = MetricsEmitter(namespace="AwsAgenticRobotics", service="text-control")
 
 # Create a blueprint for the API routes
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+def _record_stream_error(route: str, error: Exception) -> None:
+    metrics.emit(Metric("AgentStreamFailure"), route=route)
+    logger.error("Agent stream failed route=%s error=%s", route, error, exc_info=True)
+
+
 @api_bp.route("/chat", methods=["POST"])
 @require_hybrid_auth
 def chat():
-    try:
-        data = request.get_json(silent=True) or request.json or {}
-    except Exception:
-        data = request.json or {}
+    data = request.get_json(silent=True) or {}
     return asyncio.run(_chat(data))
 
 
@@ -75,49 +84,27 @@ def talk_stream():
     extra = params["extra"]
     user_params = params["user_params"]
 
-    logger.info(f"Talk stream request details - Session: {session_id}, Trace: {trace_id}, User Params: {user_params}")
+    logger.info(
+        "Talk stream request session=%s trace=%s has_user_params=%s",
+        session_id,
+        trace_id,
+        bool(user_params),
+    )
     # Use dynamically mapped project_id
-    context = get_robot(project_id)
-    background = ""
-    if context:
-        name = context.get("robot_name")
-        background = context.get("context")
-        background = f"""
-<background>Your Name:{name}
-background: {background}
-</background>
-            """
+    background = RobotPromptContext.from_record(get_robot(project_id)).as_prompt_block()
+    stream_request = StreamRequest(ask_text, session_id, trace_id, extra)
 
     # 3. Create Strands agent and stream response
     try:
         def stream_response():
-            try:
-                async def async_stream():
-                    agent = await create_robot_agent_mcp(session_id, background)
-                    async for chunk in stream_agent_response(
-                        agent, ask_text, session_id, trace_id, extra
-                    ):
-                        yield chunk
-
-                # Yield from the async generator wrapper
-                for chunk in create_sync_stream_wrapper(async_stream()):
-                    yield chunk
-
-            except Exception as e:
-                logger.error(f"Error in stream_response: {e}", exc_info=True)
-                error_chunk = {
-                    "askText": ask_text,
-                    "extra": extra,
-                    "id": trace_id,
-                    "replyPayload": None,
-                    "replyText": f"Error: {str(e)}",
-                    "replyType": "Error",
-                    "sessionId": session_id,
-                    "timestamp": int(datetime.now().timestamp() * 1000),
-                    "traceId": trace_id,
-                    "isFinal": True,
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield from create_agent_stream(
+                stream_request,
+                background,
+                agent_factory=create_robot_agent_mcp,
+                response_streamer=stream_agent_response,
+                sync_wrapper=create_sync_stream_wrapper,
+                on_error=lambda error: _record_stream_error("talk", error),
+            )
 
         return Response(
             stream_response(),
@@ -330,16 +317,7 @@ def chat_api_strands():
     if parse_error:
         return parse_error
     
-    context = get_robot(project_id)
-    background = ""
-    if context:
-        name = context.get("robot_name")
-        background = context.get("context")
-        background = f"""
-<background>Your Name:{name}
-background: {background}
-</background>
-            """
+    background = RobotPromptContext.from_record(get_robot(project_id)).as_prompt_block()
 
     # Use Strands agent for response
     try:
@@ -396,47 +374,23 @@ def chat_api_strands_stream():
     trace_id = params["trace_id"]
     extra = params.get("extra", {})
 
-    context = get_robot(project_id)
-
-    background = ""
-    if context:
-        name = context.get("robot_name")
-        background = context.get("context")
-        background = f"""
-<background>Your Name:{name}
-background: {background}
-</background>
-            """
+    background = RobotPromptContext.from_record(get_robot(project_id)).as_prompt_block()
+    stream_request = StreamRequest(ask_text, session_id, trace_id, extra)
     # 3. Create Strands agent and stream response
     try:
         def stream_response():
-            try:
-                async def async_stream():
-                    agent = await create_robot_agent_mcp(session_id, background, enable_grounding=True)
-                    async for chunk in stream_agent_response(
-                        agent, ask_text, session_id, trace_id, extra
-                    ):
-                        yield chunk
-
-                # Yield from the async generator wrapper
-                for chunk in create_sync_stream_wrapper(async_stream()):
-                    yield chunk
-
-            except Exception as e:
-                logger.error(f"Error in stream_response: {e}", exc_info=True)
-                error_chunk = {
-                    "id": str(uuid.uuid4()),
-                    "askText": ask_text,
-                    "extra": extra,
-                    "traceId": trace_id,
-                    "replyPayload": None,
-                    "replyText": f"Error: {str(e)}",
-                    "replyType": "Error",
-                    "sessionId": session_id,
-                    "timestamp": int(datetime.now().timestamp() * 1000),
-                    "isFinal": True,
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield from create_agent_stream(
+                stream_request,
+                background,
+                agent_factory=create_robot_agent_mcp,
+                response_streamer=stream_agent_response,
+                sync_wrapper=create_sync_stream_wrapper,
+                enable_grounding=True,
+                include_generated_error_id=True,
+                on_error=lambda error: _record_stream_error(
+                    "xiaoice-chat-api-strands-stream", error
+                ),
+            )
 
         return Response(
             stream_response(),
@@ -483,47 +437,23 @@ def xiaoice_stream_machine():
     trace_id = params["trace_id"]
     extra = params.get("extra", {})
 
-    context = get_robot(project_id)
-
-    background = ""
-    if context:
-        name = context.get("robot_name")
-        background = context.get("context")
-        background = f"""
-<background>Your Name:{name}
-background: {background}
-</background>
-            """
+    background = RobotPromptContext.from_record(get_robot(project_id)).as_prompt_block()
+    stream_request = StreamRequest(ask_text, session_id, trace_id, extra)
     # 3. Create Strands agent and stream response
     try:
         def stream_response():
-            try:
-                async def async_stream():
-                    agent = await create_robot_agent_mcp(session_id, background, enable_grounding=True)
-                    async for chunk in stream_agent_response(
-                        agent, ask_text, session_id, trace_id, extra
-                    ):
-                        yield chunk
-
-                # Yield from the async generator wrapper
-                for chunk in create_sync_stream_wrapper(async_stream()):
-                    yield chunk
-
-            except Exception as e:
-                logger.error(f"Error in stream_response: {e}", exc_info=True)
-                error_chunk = {
-                    "id": str(uuid.uuid4()),
-                    "askText": ask_text,
-                    "extra": extra,
-                    "traceId": trace_id,
-                    "replyPayload": None,
-                    "replyText": f"Error: {str(e)}",
-                    "replyType": "Error",
-                    "sessionId": session_id,
-                    "timestamp": int(datetime.now().timestamp() * 1000),
-                    "isFinal": True,
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield from create_agent_stream(
+                stream_request,
+                background,
+                agent_factory=create_robot_agent_mcp,
+                response_streamer=stream_agent_response,
+                sync_wrapper=create_sync_stream_wrapper,
+                enable_grounding=True,
+                include_generated_error_id=True,
+                on_error=lambda error: _record_stream_error(
+                    "xiaoice-stream-machine", error
+                ),
+            )
 
         return Response(
             stream_response(),
@@ -555,16 +485,7 @@ async def _chat(data):
 
     selected_robots = data.get("robots")
     context_robot = selected_robots[0] if selected_robots else None
-    context = get_robot(context_robot)
-    background = ""
-    if context:
-        name = context.get("robot_name")
-        background = context.get("context")
-        background = f"""
-<background>Your Name:{name}
-background: {background}
-</background>
-            """
+    background = RobotPromptContext.from_record(get_robot(context_robot)).as_prompt_block()
 
     # Use Strands MCP agent instead of old chat service
     try:
@@ -604,7 +525,7 @@ def get_robot_by_id(robot_id):
 @api_bp.route("/robots", methods=["POST"])
 @require_hybrid_auth
 def create_robot():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     robot_id = data.get("id")
     if not robot_id:
         return jsonify({"error": "Missing id"}), 400
@@ -615,7 +536,7 @@ def create_robot():
 @api_bp.route("/robots/<robot_id>", methods=["PUT"])
 @require_hybrid_auth
 def robot_update(robot_id):
-    data = request.json
+    data = request.get_json(silent=True) or {}
     robot = upsert_robot(robot_id, data)
     return jsonify(robot)
 
@@ -631,28 +552,32 @@ def robot_delete(robot_id):
 @require_hybrid_auth
 def run_action(robot_id):
     """Run process_actions with provided action and robot"""
-    try:
-        data = request.get_json(silent=True) or request.json or {}
-    except Exception:
-        # Fallback to synchronous request.json if async fails
-        data = request.json or {}
-
-    robot = robot_id or data.get("robot")
-    method = data.get("method")
-    action = data.get("action")
-
-    logger.info(
-        f"Running action for robot: {robot}, method: {method}, action: {action}"
+    action_request = ActionRequest.from_payload(
+        robot_id, request.get_json(silent=True)
     )
 
-    if not method or not action or not robot:
+    logger.info(
+        "Running action robot=%s method=%s action=%s",
+        action_request.robot_id,
+        action_request.method,
+        action_request.action,
+    )
+
+    if (
+        not action_request.robot_id
+        or not action_request.method
+        or (
+            action_request.method == "RunAction"
+            and not action_request.action
+        )
+    ):
         return jsonify({"error": "Missing robot or method or params."}), 400
 
-    if method == "RunAction":
-        results = asyncio.run(robot_service.process_actions([action], robot))
-        return jsonify({"results": results})
-    if method == "StopAction":
-        results = asyncio.run(robot_service.process_actions(["stop"], robot))
+    actions = action_request.execution_actions
+    if actions is not None:
+        results = asyncio.run(
+            robot_service.process_actions(actions, action_request.robot_id)
+        )
         return jsonify({"results": results})
     return jsonify({"error": "Invalid method"}), 400
 
@@ -689,11 +614,9 @@ def robot_speech(robot_id):
     if not robot_id:
         return jsonify({"error": "Missing robot_id"}), 400
 
-    data = request.get_json(silent=True) or {}
-    text = data.get("text", "").strip()
-    language = data.get("language", "yue")
+    speech_request = SpeechRequest.from_payload(request.get_json(silent=True))
 
-    if not text:
+    if not speech_request.text:
         return jsonify({"error": "Missing or empty 'text' parameter"}), 400
 
     try:
@@ -703,16 +626,15 @@ def robot_speech(robot_id):
         result = asyncio.run(
             mcp_client.call_tool(
                 "robot_speak",
-                {"robot_id": robot_id, "text": text, "language": language},
+                {
+                    "robot_id": robot_id,
+                    "text": speech_request.text,
+                    "language": speech_request.language,
+                },
             )
         )
 
-        # Extract text from MCP response
-        content = result.get("content", []) if isinstance(result, dict) else []
-        response_text = next(
-            (c.get("text", "") for c in content if c.get("type") == "text"),
-            str(result),
-        )
+        response_text = extract_mcp_text(result)
 
         success = "Failed" not in response_text and "Error" not in response_text
         status_code = 200 if success else 500
@@ -720,8 +642,8 @@ def robot_speech(robot_id):
         return jsonify({
             "success": success,
             "robot_id": robot_id,
-            "text": text,
-            "language": language,
+            "text": speech_request.text,
+            "language": speech_request.language,
             "response": response_text,
         }), status_code
 

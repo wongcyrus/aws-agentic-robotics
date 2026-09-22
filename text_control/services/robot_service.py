@@ -16,6 +16,7 @@ import boto3
 from botocore.config import Config
 from models.actions import get_available_actions
 from utils.lambda_logger import get_lambda_logger
+from utils.observability import Metric, MetricsEmitter
 
 from .publishers import (
     DogPublisher,
@@ -42,6 +43,7 @@ class RobotService:
         sleep_fn=None,
         client_factory=None,
         uuid_factory=None,
+        metrics_emitter=None,
     ):
         self.robot_publisher = robot_publisher or StandardRobotPublisher()
         self.drone_publisher = drone_publisher or DronePublisher()
@@ -51,6 +53,10 @@ class RobotService:
         self._sleep = sleep_fn or sleep
         self._client_factory = client_factory or boto3.client
         self._uuid_factory = uuid_factory or uuid_mod.uuid4
+        self._metrics = metrics_emitter or MetricsEmitter(
+            namespace="AwsAgenticRobotics",
+            service="text-control",
+        )
 
     def _get_robot_ids(self) -> List[str]:
         """Get list of robot IDs"""
@@ -384,6 +390,10 @@ class RobotService:
             logger.info("Published capture_image to %s", topic)
         except Exception as e:
             logger.error("Failed to publish capture_image to %s: %s", topic, e)
+            self._metrics.emit(
+                Metric("RobotCapturePublishFailure"),
+                robotId=robot_id,
+            )
             return {"success": False, "error": f"IoT publish failed: {e}"}
 
         # 3. Poll S3 every 0.5s for up to 15s
@@ -404,6 +414,7 @@ class RobotService:
                 elapsed += 0.5
 
         logger.warning("Robot %s did not upload image within timeout", robot_id)
+        self._metrics.emit(Metric("RobotCaptureTimeout"), robotId=robot_id)
         return {
             "success": False,
             "error": "Cannot read image from robot. The robot did not upload the image in time.",

@@ -114,6 +114,10 @@ describe("core constructs", () => {
         ],
         BillingMode: "PAY_PER_REQUEST",
         KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],
+        SSESpecification: {
+          SSEEnabled: true,
+          SSEType: "KMS",
+        },
       }),
     });
     expect(Object.values(template.toJSON().Outputs)).toContainEqual(

@@ -78,7 +78,23 @@ describe("AgentCore-backed constructs", () => {
     const writeSpy = jest
       .spyOn(fsModule, "writeFileSync")
       .mockImplementation((_path, content) => {
-        schemaWrites.push(String(content));
+        const serialized = String(content);
+        try {
+          const candidate = JSON.parse(serialized) as unknown;
+          if (
+            Array.isArray(candidate) &&
+            candidate.every(
+              (entry) =>
+                typeof entry === "object" &&
+                entry !== null &&
+                "name" in entry
+            )
+          ) {
+            schemaWrites.push(serialized);
+          }
+        } catch {
+          // Ignore unrelated CDK cache writes.
+        }
       });
     const schemaSpy = jest
       .spyOn(agentcore.ToolSchema, "fromLocalAsset")
@@ -200,6 +216,17 @@ describe("AgentCore-backed constructs", () => {
         PriceClass: "PriceClass_100",
       }),
     });
+    template.hasResourceProperties("AWS::S3::Bucket", {
+      BucketEncryption: {
+        ServerSideEncryptionConfiguration: [
+          {
+            ServerSideEncryptionByDefault: {
+              SSEAlgorithm: "AES256",
+            },
+          },
+        ],
+      },
+    });
     const policies = JSON.stringify(template.findResources("AWS::IAM::Policy"));
     expect(policies).toContain("bedrock:InvokeModelWithResponseStream");
     expect(policies).toContain("amazon.nova-2-sonic-v1:0");
@@ -290,6 +317,9 @@ describe("AgentCore-backed constructs", () => {
       GlobalSecondaryIndexes: [
         Match.objectLike({ IndexName: "RoomCodeIndex" }),
       ],
+      SSESpecification: {
+        SSEEnabled: true,
+      },
     });
     template.hasResourceProperties("AWS::S3::Bucket", {
       LifecycleConfiguration: {
@@ -301,6 +331,28 @@ describe("AgentCore-backed constructs", () => {
         ],
       },
     });
+    template.resourcePropertiesCountIs(
+      "AWS::S3::Bucket",
+      Match.objectLike({
+        BucketEncryption: {
+          ServerSideEncryptionConfiguration: [
+            {
+              ServerSideEncryptionByDefault: {
+                SSEAlgorithm: "AES256",
+              },
+            },
+          ],
+        },
+        // Both buckets intentionally serve browser content; public ACLs stay blocked.
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: false,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: false,
+        },
+      }),
+      2
+    );
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       AuthorizationType: "CUSTOM",
       RouteKey: "$connect",

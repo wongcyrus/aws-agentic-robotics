@@ -3,7 +3,6 @@ Strands Agents service for robot control using existing MCP client
 This version dynamically creates Strands tools from MCP server tools
 """
 
-import os
 import config
 from mcp_client import get_mcp_client
 from strands import Agent
@@ -125,8 +124,8 @@ async def create_robot_agent_with_mcp(session_id: str, background: str = "", ena
     model_to_use = nova_model
     if enable_grounding:
         class GroundedBedrockModel(BedrockModel):
-            def _format_request(self, *args, **kwargs):
-                req = super()._format_request(*args, **kwargs)
+            def format_request(self, *args, **kwargs):
+                req = super().format_request(*args, **kwargs)
                 if "toolConfig" not in req:
                     req["toolConfig"] = {"tools": []}
                 # Check if nova_grounding is already there to avoid duplicates
@@ -178,8 +177,10 @@ async def create_robot_agent_with_mcp(session_id: str, background: str = "", ena
                             
                     req["messages"] = merged_messages
                             
-                import json
-                logger.info(f"Bedrock request messages: {json.dumps(req.get('messages', []))}")
+                logger.info(
+                    "Prepared grounded Bedrock request message_count=%d",
+                    len(req.get("messages", [])),
+                )
                 return req
 
         model_to_use = GroundedBedrockModel(
@@ -216,6 +217,6 @@ async def create_robot_agent(session_id: str, background: str = "", enable_groun
 
         logger.warning("MCP_SERVER_URL not configured, using local tools")
         raise ValueError("MCP_SERVER_URL not configured")
-    except Exception as e:
-        logger.error("MCP agent creation failed: %s", e)
-        raise e
+    except Exception:
+        logger.exception("MCP agent creation failed")
+        raise

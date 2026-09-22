@@ -71,8 +71,7 @@ function addLogsDeliveryWritePolicy(scope: Construct, logGroup: logs.ILogGroup):
 function configureTracingDelivery(scope: Construct, id: string, sourceArn: string): logs.CfnDelivery {
   const stack = Stack.of(scope);
 
-  let deliverySource: logs.CfnDeliverySource;
-  deliverySource = new logs.CfnDeliverySource(scope, `${id}TracesDeliverySource`, {
+  const deliverySource = new logs.CfnDeliverySource(scope, `${id}TracesDeliverySource`, {
     name: Lazy.string({
       produce: (): string =>
         Names.uniqueResourceName(deliverySource, {
@@ -114,8 +113,7 @@ function configureTracingDelivery(scope: Construct, id: string, sourceArn: strin
     })
   );
 
-  let deliveryDestination: logs.CfnDeliveryDestination;
-  deliveryDestination = new logs.CfnDeliveryDestination(
+  const deliveryDestination = new logs.CfnDeliveryDestination(
     scope,
     `${id}TracesDeliveryDestination`,
     {
@@ -202,8 +200,7 @@ export function applyAgentCoreGatewayObservability(
   );
   addLogsDeliveryWritePolicy(scope, applicationLogGroup);
 
-  let deliverySource: logs.CfnDeliverySource;
-  deliverySource = new logs.CfnDeliverySource(scope, `${id}ApplicationDeliverySource`, {
+  const deliverySource = new logs.CfnDeliverySource(scope, `${id}ApplicationDeliverySource`, {
     name: Lazy.string({
       produce: (): string =>
         Names.uniqueResourceName(deliverySource, {
@@ -214,8 +211,7 @@ export function applyAgentCoreGatewayObservability(
     resourceArn: gateway.gatewayArn,
   });
 
-  let deliveryDestination: logs.CfnDeliveryDestination;
-  deliveryDestination = new logs.CfnDeliveryDestination(
+  const deliveryDestination = new logs.CfnDeliveryDestination(
     scope,
     `${id}ApplicationDeliveryDestination`,
     {

@@ -42,5 +42,8 @@ jobs:
           npm ci --prefix cdk
           npm ci --prefix domain-expansion-ar-game
 
+      - name: Run static checks
+        run: ./scripts/lint.sh
+
       - name: Run all deterministic tests
         run: ./scripts/test-all.sh

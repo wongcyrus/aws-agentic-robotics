@@ -1,7 +1,12 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import { RemovalPolicy } from "aws-cdk-lib";
-import { AttributeType, Billing, TableV2 } from "aws-cdk-lib/aws-dynamodb";
+import {
+  AttributeType,
+  Billing,
+  TableEncryptionV2,
+  TableV2,
+} from "aws-cdk-lib/aws-dynamodb";
 
 export class DatabaseConstruct extends Construct {
   /**
@@ -17,6 +22,7 @@ export class DatabaseConstruct extends Construct {
         type: AttributeType.STRING,
       },
       billing: Billing.onDemand(), // On-demand capacity
+      encryption: TableEncryptionV2.awsManagedKey(),
       removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: false,

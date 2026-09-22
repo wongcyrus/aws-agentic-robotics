@@ -135,6 +135,7 @@ export class SpeechControlAgentcoreConstruct extends Construct {
     // 6. Serverless Frontend S3 Website Bucket
     const websiteBucket = new s3.Bucket(this, "SpeechAgentcoreWebsiteBucket", {
       websiteIndexDocument: "index.html",
+      encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       publicReadAccess: true,

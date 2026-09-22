@@ -10,7 +10,7 @@ import os
 import re
 import time
 import uuid
-from typing import Any, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional
 
 import boto3
 import httpx
@@ -144,15 +144,25 @@ class SecureMCPClient:
     """MCP Client that uses the native Strands MCP client over AgentCore Gateway
     with AWS SigV4 authentication or standard HTTP requests."""
 
-    def __init__(self, mcp_url: str, use_aws_auth: bool = True):
+    def __init__(
+        self,
+        mcp_url: str,
+        use_aws_auth: bool = True,
+        *,
+        client_factory: Callable[..., MCPClient] = MCPClient,
+    ):
         self.mcp_url = mcp_url
         self.use_aws_auth = use_aws_auth
+        self._client_factory = client_factory
         self.timeout_seconds = int(os.environ.get("MCP_TIMEOUT_SECONDS", "15"))
         self.sse_read_timeout = int(os.environ.get("MCP_SSE_READ_TIMEOUT_SECONDS", "300"))
 
-        print(f"Creating SecureMCPClient. url={self.mcp_url} use_aws_auth={self.use_aws_auth}")
+        logger.info(
+            "Creating SecureMCPClient use_aws_auth=%s",
+            self.use_aws_auth,
+        )
 
-        self._client = MCPClient(
+        self._client = self._client_factory(
             self._create_transport,
             startup_timeout=max(self.timeout_seconds, 30),
         )
@@ -165,7 +175,7 @@ class SecureMCPClient:
             self.timeout_seconds,
             read=self.sse_read_timeout,
         )
-        print(f"Opening MCP transport. url={self.mcp_url}")
+        logger.info("Opening MCP transport")
 
         auth = None
         if self.use_aws_auth:
@@ -180,31 +190,31 @@ class SecureMCPClient:
                 self.mcp_url,
                 http_client=client,
             ) as streams:
-                print(f"MCP transport established for {self.mcp_url}")
+                logger.info("MCP transport established")
                 yield streams
-        print(f"MCP transport closed for {self.mcp_url}")
+        logger.info("MCP transport closed")
 
     def start(self) -> "SecureMCPClient":
         """Start the MCP client background process."""
-        print(f"Starting MCP client for {self.mcp_url}")
+        logger.info("Starting MCP client")
         try:
             self._client.start()
-            print(f"MCP client started successfully for {self.mcp_url}")
-        except Exception as e:
-            print(f"Failed to start MCP client for {self.mcp_url}: {e}")
+            logger.info("MCP client started successfully")
+        except Exception:
+            logger.exception("Failed to start MCP client")
             raise
         return self
 
     async def _recreate_client(self):
         """Safely close and recreate the underlying MCP client on failure."""
-        print(f"Recreating underlying MCP client for {self.mcp_url}...")
+        logger.info("Recreating underlying MCP client")
         try:
             self._client.stop(None, None, None)
-        except Exception as e:
-            print(f"Error stopping client during reset: {e}")
+        except Exception:
+            logger.exception("Error stopping client during reset")
         
         self._cached_tools = None
-        self._client = MCPClient(
+        self._client = self._client_factory(
             self._create_transport,
             startup_timeout=max(self.timeout_seconds, 30),
         )
@@ -227,8 +237,8 @@ class SecureMCPClient:
         try:
             result = await asyncio.to_thread(_sync_call)
             return _convert_tool_result_to_dict(result)
-        except Exception as e:
-            print(f"MCP tool call failed: {e}. Retrying with recreated client...")
+        except Exception as error:
+            logger.warning("MCP tool call failed; recreating client: %s", error)
             try:
                 await self._recreate_client()
                 result = await asyncio.to_thread(_sync_call)
@@ -257,8 +267,8 @@ class SecureMCPClient:
 
         try:
             tools = await asyncio.to_thread(_sync_list)
-        except Exception as e:
-            print(f"MCP list tools failed: {e}. Retrying with recreated client...")
+        except Exception as error:
+            logger.warning("MCP list tools failed; recreating client: %s", error)
             try:
                 await self._recreate_client()
                 tools = await asyncio.to_thread(_sync_list)
@@ -283,12 +293,12 @@ class SecureMCPClient:
 
     async def close(self):
         """Close the client and clean up resources"""
-        print(f"Stopping MCP client for {self.mcp_url}")
+        logger.info("Stopping MCP client")
         try:
             self._client.stop(None, None, None)
-            print("MCP client stopped successfully")
-        except Exception as e:
-            print(f"Error stopping MCP client: {e}")
+            logger.info("MCP client stopped successfully")
+        except Exception:
+            logger.exception("Error stopping MCP client")
 
     async def __aenter__(self):
         """Async context manager entry - no-op to keep shared client alive"""
@@ -311,7 +321,7 @@ def notify_new_invocation(request_id: str):
     """Notify the MCP client module of a new Lambda invocation request ID to proactively heal the connection."""
     global _last_request_id, _last_invocation_time, _mcp_client
     if _last_request_id != request_id:
-        print(f"New Lambda invocation detected. request_id={request_id}, previous={_last_request_id}")
+        logger.info("New Lambda invocation detected request_id=%s", request_id)
         _last_request_id = request_id
         
         now = time.time()
@@ -320,10 +330,13 @@ def notify_new_invocation(request_id: str):
             if _last_invocation_time is not None:
                 idle_duration = now - _last_invocation_time
                 if idle_duration > 300:
-                    print(f"Proactively recycling idle MCP client (idle for {idle_duration:.1f}s > 300s) to avoid stale connection...")
+                    logger.info(
+                        "Recycling idle MCP client idle_seconds=%.1f",
+                        idle_duration,
+                    )
                     should_recycle = True
             else:
-                print("Proactively recycling MCP client (no last invocation timestamp) to be safe...")
+                logger.info("Recycling MCP client without prior invocation timestamp")
                 should_recycle = True
                 
         _last_invocation_time = now
@@ -340,7 +353,7 @@ def get_mcp_client() -> SecureMCPClient:
         if not MCP_SERVER_URL:
             raise ValueError("MCP_SERVER_URL not configured")
         auth_type = 'AWS SigV4' if use_aws_auth else 'standard'
-        print(f"Initializing MCP client with {auth_type} authentication. URL={MCP_SERVER_URL}")
+        logger.info("Initializing MCP client authentication=%s", auth_type)
         _mcp_client = SecureMCPClient(MCP_SERVER_URL, use_aws_auth=use_aws_auth)
     return _mcp_client
 
@@ -358,7 +371,7 @@ def cleanup_mcp_client():
                     loop.run_until_complete(_mcp_client.close())
             except RuntimeError:
                 asyncio.run(_mcp_client.close())
-        except Exception as e:
-            print(f"Error closing MCP client: {e}")
+        except Exception:
+            logger.exception("Error closing MCP client")
         finally:
             _mcp_client = None

@@ -9,9 +9,13 @@ export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-test}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 export AWS_EC2_METADATA_DISABLED=true
 
+echo "==> Deployment output contracts"
+"${ROOT_DIR}/scripts/deployment/tests/test_deployment_output.sh"
+
 run_pytest_coverage() {
     local name="$1"
     local directory="$2"
+    local minimum="$3"
 
     echo "==> ${name}"
     (
@@ -19,6 +23,8 @@ run_pytest_coverage() {
         uv run --with-requirements requirements-dev.txt pytest \
             --cov=. \
             --cov-branch \
+            --cov-config="${ROOT_DIR}/.coveragerc" \
+            --cov-fail-under="${minimum}" \
             --cov-report=term-missing \
             -q
         rm -f .coverage
@@ -40,16 +46,21 @@ echo "==> Domain Expansion Node helpers"
 (
     cd "${ROOT_DIR}/domain-expansion-ar-game"
     node --check server.js
-    npm run test:coverage
+    node --test --experimental-test-coverage \
+        --test-coverage-lines=90 \
+        --test-coverage-branches=90 \
+        --test-coverage-functions=90
 )
 
-run_pytest_coverage "Text control" "text_control"
+run_pytest_coverage "Text control" "text_control" 85
 run_pytest_coverage \
     "Domain Expansion serverless backend" \
-    "domain-expansion-ar-game-serverless/backend"
+    "domain-expansion-ar-game-serverless/backend" \
+    80
 run_pytest_coverage \
     "Domain Expansion commentator AgentCore" \
-    "domain-expansion-commentator-agentcore"
+    "domain-expansion-commentator-agentcore" \
+    85
 
 echo "==> Robot clients"
 (
@@ -66,7 +77,8 @@ echo "==> Robot clients"
         --parallel-mode --source=speech \
         -m unittest discover -s speech/tests -p 'test_*.py'
     uv run --with coverage python -m coverage combine --quiet
-    uv run --with coverage python -m coverage report -m --omit='*/tests/*'
+    uv run --with coverage python -m coverage report \
+        --fail-under=85 -m --omit='*/tests/*'
     rm -f .coverage .coverage.*
     rm -f speech/logs/speech.log
 )
@@ -91,6 +103,7 @@ echo "==> Robot skills"
         --parallel-mode --source=digital_human_adb/scripts \
         -m unittest discover -s digital_human_adb/tests -p 'test_*.py'
     uv run --with coverage python -m coverage combine --quiet
-    uv run --with coverage python -m coverage report -m --omit='*/tests/*'
+    uv run --with coverage python -m coverage report \
+        --fail-under=85 -m --omit='*/tests/*'
     rm -f .coverage .coverage.*
 )

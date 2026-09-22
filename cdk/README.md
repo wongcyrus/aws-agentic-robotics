@@ -5,7 +5,10 @@ This CDK app provisions the AWS infrastructure for the AWS Agentic Robotics proj
 ## Useful commands
 
 - `npm run build` — compile TypeScript
+- `npm run typecheck` — validate strict TypeScript without emitting files
+- `npm run lint` — lint the CDK app and tests with ESLint
 - `npm run test` — run unit tests
+- `npm run test:coverage` — run tests with the enforced 95% global coverage thresholds
 - `npx cdk synth AwsAgenticRobotics` — synthesize CloudFormation
 - `npx cdk diff AwsAgenticRobotics` — compare local changes with the deployed stack
 - `npx cdk deploy AwsAgenticRobotics` — deploy the `aws-agentic-robotics` stack

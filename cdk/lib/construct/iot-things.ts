@@ -178,7 +178,7 @@ export class BatchIoTThings extends Construct {
     this.customResource.addPropertyOverride("ThingNames", thingNames);
 
     // Initialize the thing certificates array based on the simplified response
-    this.thingCertificates = thingNames.map((thingName, index) => {
+    this.thingCertificates = thingNames.map((thingName) => {
       if (saveFileBucket) {
         // When using S3, certificates are stored there with predictable paths
         const certS3Path = `iot-certificates/${thingName}/${thingName}.cert.pem`;

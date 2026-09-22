@@ -104,7 +104,7 @@ git submodule update --init --recursive
 ### Prerequisites
 
 - Node.js 24 LTS or newer (for CDK and local Node.js services)
-- Python 3.8+ (for simulators and robot clients)
+- Python 3.12+ (for deterministic tests and shared development tooling)
 - AWS CLI configured with appropriate permissions
 - Docker (optional, for containerized deployment)
 
@@ -181,7 +181,22 @@ Deployment
 This script will:
 
 - Deploy the CDK stack
+- Validate the generated `cdk/output.json` before using any deployment output
 - Automatically sync IoT certificates from S3 to local robot_client/certificates/
+
+Network post-deploy checks are opt-in, so the default deployment behavior remains
+unchanged:
+
+```bash
+# Check the deployed website and API endpoints
+./deploy.sh --check-health
+
+# Also invoke the commentator AgentCore runtime with a small health prompt
+./deploy.sh --check-health --check-agentcore --check-timeout 30
+```
+
+Each check is bounded by the configured timeout. The AgentCore check can incur a
+small runtime/model charge and requires `bedrock-agentcore:InvokeAgentRuntime`.
 
 3. **Destroy Stacks** (when needed):
 
@@ -202,6 +217,11 @@ From the repository root:
 sudo apt update && sudo apt install -y jq
 source ./load_cdkstack_env.sh
 ```
+
+The loader validates that the file contains exactly one stack, required outputs
+are present, and output names/values are safe to export. It does not evaluate
+the output file as shell code. Override the file for automation with
+`CDK_OUTPUT_FILE=/path/to/output.json source ./load_cdkstack_env.sh`.
 
 #### Download AWS IoT Certificates
 
@@ -225,6 +245,17 @@ aws cognito-idp admin-create-user \
 
 ## Testing and coverage
 
+Install the pinned root development tools and run static checks:
+
+```bash
+uv sync --only-group dev
+./scripts/lint.sh
+```
+
+The root `pyproject.toml` and `uv.lock` pin shared Ruff and mypy tooling. Runtime
+dependencies remain in each deployable service's `requirements.txt` because the
+Lambda and AgentCore packaging boundaries resolve independently.
+
 Run every deterministic unit suite across the CDK application, backend services,
 Node helpers, robot clients, and robot skills:
 
@@ -246,9 +277,26 @@ AgentCore backend, and enforces an 80% combined branch-inclusive minimum. Set
 COVERAGE_MIN=85 ./scripts/coverage.sh
 ```
 
-The broader command reports component coverage where practical. Only the core
-backend percentage is combined because CDK synthesis, Node helpers, service
-routes, and hardware-facing clients have different executable boundaries.
+The full suite enforces component-specific floors: CDK 95%, Node helpers 90%,
+robot clients and skills 85%, Domain Expansion backend 80%, commentator
+AgentCore 85%, and text control 85%. One-off administrative scripts are excluded
+from text-control application coverage; deployed runtime modules remain measured.
+
+The refactored request paths keep AWS entry points thin:
+
+- `text_control/services/chat_orchestration.py` owns typed chat streaming
+  orchestration.
+- `text_control/services/robot_api.py` owns robot action and speech request
+  normalization.
+- `domain-expansion-ar-game-serverless/backend/http_request.py` owns HTTP request
+  parsing and prompt/technique decisions.
+- `domain-expansion-ar-game-serverless/backend/websocket_handler.py` owns
+  WebSocket routing behind injected table and API clients.
+
+AWS clients and resources are created through entry-point factories or lazy
+accessors so unit tests can use local fakes. Structured log summaries redact
+credentials and request bodies, and metrics use CloudWatch Embedded Metric
+Format without requiring a CloudWatch client during tests.
 
 ### 1. Speech Control Interface
 

@@ -63,6 +63,14 @@ def test_validate_jwt_token_success_missing_key_and_error(monkeypatch):
     assert middleware.validate_jwt_token("token") == {"sub": "user"}
     monkeypatch.setattr(middleware.jwt, "get_unverified_header", lambda _token: {"kid": "other"})
     assert middleware.validate_jwt_token("token") is None
+
+
+def test_internal_secret_requires_explicit_configuration(monkeypatch):
+    monkeypatch.delenv("INTERNAL_ROBOT_SECRET", raising=False)
+    assert middleware.has_valid_internal_secret("test-internal-secret") is False
+    monkeypatch.setenv("INTERNAL_ROBOT_SECRET", "configured")
+    assert middleware.has_valid_internal_secret("configured") is True
+    assert middleware.has_valid_internal_secret("wrong") is False
     monkeypatch.setattr(
         middleware, "get_jwks", lambda: (_ for _ in ()).throw(RuntimeError("down"))
     )
@@ -97,7 +105,7 @@ def test_hybrid_auth_internal_session_gateway_jwt_and_rejection(monkeypatch):
     client = app.test_client()
     assert client.get("/protected").status_code == 401
     internal = client.get(
-        "/protected", headers={"X-Internal-Secret": "hktiit_robot_internal_bypass_2026"}
+        "/protected", headers={"X-Internal-Secret": "test-internal-secret"}
     )
     assert internal.get_json()["username"] == "internal_system"
     with client.session_transaction() as flask_session:

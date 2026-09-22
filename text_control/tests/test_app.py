@@ -13,15 +13,16 @@ def _load_app(monkeypatch):
     return importlib.import_module("app")
 
 
-def test_application_hooks_add_cors_and_log_safely(monkeypatch, capsys):
+def test_application_hooks_add_cors_and_redact_sensitive_headers(monkeypatch, capsys):
     app_module = _load_app(monkeypatch)
     client = app_module.app.test_client()
-    response = client.get("/", headers={"Authorization": "Bearer very-long-secret-token"})
+    response = client.get("/", headers={"Authorization": "test-secret-token"})
     output = capsys.readouterr().out
 
     assert response.status_code == 302
     assert response.headers["Access-Control-Allow-Origin"] == "*"
-    assert "Bearer ver...token" in output
+    assert "[REDACTED]" in output
+    assert "test-secret-token" not in output
 
 
 def test_application_factory_can_skip_external_startup(monkeypatch):
@@ -38,6 +39,23 @@ def test_application_factory_can_skip_external_startup(monkeypatch):
     assert isolated_app.config["SECRET_KEY"] == "test-secret"
     assert isolated_app.cache is not None
     assert calls == []
+
+
+def test_log_helpers_redact_secrets_and_summarize_events(monkeypatch):
+    app_module = _load_app(monkeypatch)
+    assert app_module.summarize_lambda_event(
+        {
+            "requestContext": {
+                "requestId": "request",
+                "http": {"method": "POST", "path": "/api/chat"},
+            },
+            "body": "sensitive",
+        }
+    ) == {
+        "method": "POST",
+        "path": "/api/chat",
+        "requestId": "request",
+    }
 
 
 def test_lambda_entry_point_keeps_aws_signature(monkeypatch):
