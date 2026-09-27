@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import time
 import logging
@@ -20,6 +21,101 @@ SESSIONS_TABLE_NAME = os.environ.get('SESSIONS_TABLE', 'RobotSimulatorSessions')
 dynamodb = boto3.resource('dynamodb')
 connections_table = dynamodb.Table(CONNECTIONS_TABLE_NAME)
 sessions_table = dynamodb.Table(SESSIONS_TABLE_NAME)
+
+FORWARD_DISTANCE = 30.0
+FAST_BACKWARD_DISTANCE = 35.0
+FAST_SIDE_DISTANCE = 25.0
+QUARTER_TURN = math.pi / 2
+
+
+def normalize_yaw(yaw):
+    """Normalize a Y-axis rotation to the range [-pi, pi)."""
+    return (yaw + math.pi) % (2 * math.pi) - math.pi
+
+
+def apply_robot_action(robot, action, current_time):
+    """Apply action metadata and any deterministic virtual pose change."""
+    duration = ACTION_DURATIONS.get(action, ACTION_DURATIONS['default'])
+    position = [float(value) for value in robot.get('position', [0.0, 0.0, 0.0])]
+    rotation = [float(value) for value in robot.get('rotation', [0.0, 0.0, 0.0])]
+    start_position = position.copy()
+    start_rotation = rotation.copy()
+    yaw = rotation[1]
+    target_yaw = yaw
+    is_movement = True
+
+    if action == 'go_forward':
+        position[0] += math.sin(yaw) * FORWARD_DISTANCE
+        position[2] += math.cos(yaw) * FORWARD_DISTANCE
+    elif action == 'back_fast':
+        position[0] -= math.sin(yaw) * FAST_BACKWARD_DISTANCE
+        position[2] -= math.cos(yaw) * FAST_BACKWARD_DISTANCE
+    elif action == 'right_move_fast':
+        position[0] += math.cos(yaw) * FAST_SIDE_DISTANCE
+        position[2] -= math.sin(yaw) * FAST_SIDE_DISTANCE
+    elif action == 'left_move_fast':
+        position[0] -= math.cos(yaw) * FAST_SIDE_DISTANCE
+        position[2] += math.sin(yaw) * FAST_SIDE_DISTANCE
+    elif action == 'turn_left':
+        target_yaw = yaw - QUARTER_TURN
+        rotation[1] = normalize_yaw(target_yaw)
+    elif action == 'turn_right':
+        target_yaw = yaw + QUARTER_TURN
+        rotation[1] = normalize_yaw(target_yaw)
+    else:
+        is_movement = False
+
+    robot['position'] = position
+    robot['rotation'] = rotation
+    robot['current_action'] = action
+    robot['action_start_time'] = current_time
+    robot['action_duration'] = duration
+    robot['is_animating'] = True
+    robot['movement_count'] = robot.get('movement_count', 0) + 1
+
+    if not is_movement:
+        return None
+
+    animation_target_rotation = rotation.copy()
+    animation_target_rotation[1] = target_yaw
+    return {
+        'start_position': start_position,
+        'start_rotation': start_rotation,
+        'target_position': position.copy(),
+        'target_rotation': animation_target_rotation,
+    }
+
+
+def apply_action_to_robots(robots, robot_id, action, current_time):
+    """Apply an action to one or all robots and return per-robot motion data."""
+    target_ids = list(robots.keys()) if robot_id == 'all' else [robot_id]
+    motions = {}
+
+    for target_id in target_ids:
+        motion = apply_robot_action(robots[target_id], action, current_time)
+        if motion:
+            motions[target_id] = motion
+
+    return motions
+
+
+def make_action_event(session_key, robot_id, action, robots, motions):
+    """Build the action event consumed by simulator clients."""
+    target_ids = list(robots.keys()) if robot_id == 'all' else [robot_id]
+    return {
+        "type": "actions",
+        "data": {
+            "session_key": session_key,
+            "action_name": action,
+            "robot_id": robot_id,
+            "action_ids": {
+                target_id: robots[target_id].get('movement_count', 0)
+                for target_id in target_ids
+            },
+            "motions": motions,
+        },
+    }
+
 
 # --- DynamoDB State & Connections Persistence ---
 
@@ -511,24 +607,8 @@ def handle_rest_request(event):
         if robot_id != "all" and robot_id not in robots:
             return make_rest_response(404, {"success": False, "error": f"Robot {robot_id} not found"})
             
-        duration = ACTION_DURATIONS.get(action, 2.0)
         current_time = time.time()
-        
-        # Trigger action updates
-        if robot_id == "all":
-            for r_id, r in robots.items():
-                r['current_action'] = action
-                r['action_start_time'] = current_time
-                r['action_duration'] = duration
-                r['is_animating'] = True
-                r['movement_count'] = r.get('movement_count', 0) + 1
-        else:
-            r = robots[robot_id]
-            r['current_action'] = action
-            r['action_start_time'] = current_time
-            r['action_duration'] = duration
-            r['is_animating'] = True
-            r['movement_count'] = r.get('movement_count', 0) + 1
+        motions = apply_action_to_robots(robots, robot_id, action, current_time)
             
         save_session_robots(session_key, robots)
         
@@ -536,10 +616,11 @@ def handle_rest_request(event):
         handle_real_robot_commands(session_key, robots, action, robot_id)
         
         # Broadcast events
-        post_to_connections(event, session_key, {
-            "type": "actions",
-            "data": {"session_key": session_key, "action_name": action, "robot_id": robot_id}
-        })
+        post_to_connections(
+            event,
+            session_key,
+            make_action_event(session_key, robot_id, action, robots, motions),
+        )
         post_to_connections(event, session_key, {
             "type": "robot_states",
             "data": robots
@@ -739,7 +820,7 @@ def handle_websocket_event(event, connection_id):
             
         elif action == "robot_action" or action == "actions":
             robot_id = body.get('robot_id', 'all')
-            action_name = body.get('action', body.get('action_name', 'idle'))
+            action_name = body.get('action_name', 'idle')
             
             robots = get_session_robots(session_key)
             if robot_id != "all" and robot_id not in robots:
@@ -749,25 +830,15 @@ def handle_websocket_event(event, connection_id):
                 })
                 return {"statusCode": 200}
                 
-            duration = ACTION_DURATIONS.get(action_name, 2.0)
             current_time = time.time()
-            
-            if robot_id == "all":
-                for r_id, r in robots.items():
-                    r['current_action'] = action_name
-                    r['action_start_time'] = current_time
-                    r['action_duration'] = duration
-                    r['is_animating'] = True
-                    r['movement_count'] = r.get('movement_count', 0) + 1
-                result = {"status": "success", "robot_id": "all", "action": action_name}
-            else:
-                r = robots[robot_id]
-                r['current_action'] = action_name
-                r['action_start_time'] = current_time
-                r['action_duration'] = duration
-                r['is_animating'] = True
-                r['movement_count'] = r.get('movement_count', 0) + 1
-                result = {"status": "success", "robot_id": robot_id, "action": action_name}
+            motions = apply_action_to_robots(
+                robots, robot_id, action_name, current_time
+            )
+            result = {
+                "status": "success",
+                "robot_id": robot_id,
+                "action": action_name,
+            }
                 
             save_session_robots(session_key, robots)
             
@@ -776,6 +847,13 @@ def handle_websocket_event(event, connection_id):
             
             # Broadcast results
             post_to_single_connection(event, connection_id, {"type": "action_result", "data": result})
+            post_to_connections(
+                event,
+                session_key,
+                make_action_event(
+                    session_key, robot_id, action_name, robots, motions
+                ),
+            )
             post_to_connections(event, session_key, {"type": "robot_states", "data": robots})
             
         elif action == "reset_session":

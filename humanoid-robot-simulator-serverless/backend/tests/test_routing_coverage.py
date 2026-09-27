@@ -135,6 +135,64 @@ class PersistenceAndParsingTests(unittest.TestCase):
         self.assertIsNone(lambda_function.get_session_key_from_event({}))
 
 
+class RobotPoseTests(unittest.TestCase):
+    def test_forward_turn_forward_accumulates_pose(self):
+        robot = sample_robots()["robot_1"]
+
+        first_motion = lambda_function.apply_robot_action(
+            robot, "go_forward", 100.0
+        )
+        turn_motion = lambda_function.apply_robot_action(
+            robot, "turn_right", 104.0
+        )
+        second_motion = lambda_function.apply_robot_action(
+            robot, "go_forward", 109.0
+        )
+
+        self.assertEqual(first_motion["start_position"], [0.0, 0.0, 0.0])
+        self.assertEqual(first_motion["target_position"], [0.0, 0.0, 30.0])
+        self.assertAlmostEqual(turn_motion["target_rotation"][1], 1.5707963268)
+        self.assertAlmostEqual(robot["position"][0], 30.0)
+        self.assertAlmostEqual(robot["position"][2], 30.0)
+        self.assertAlmostEqual(robot["rotation"][1], 1.5707963268)
+        self.assertEqual(second_motion["start_position"], [0.0, 0.0, 30.0])
+        self.assertEqual(robot["movement_count"], 3)
+
+    def test_side_and_backward_movements_follow_accumulated_yaw(self):
+        robot = sample_robots()["robot_1"]
+        robot["rotation"][1] = 1.5707963267948966
+
+        lambda_function.apply_robot_action(robot, "right_move_fast", 100.0)
+        self.assertAlmostEqual(robot["position"][0], 0.0)
+        self.assertAlmostEqual(robot["position"][2], -25.0)
+
+        lambda_function.apply_robot_action(robot, "back_fast", 104.0)
+        self.assertAlmostEqual(robot["position"][0], -35.0)
+        self.assertAlmostEqual(robot["position"][2], -25.0)
+
+    def test_non_movement_action_preserves_pose(self):
+        robot = sample_robots()["robot_1"]
+        robot["position"] = [4.0, 0.0, 8.0]
+        robot["rotation"] = [0.0, 0.5, 0.0]
+
+        motion = lambda_function.apply_robot_action(robot, "wave", 100.0)
+
+        self.assertIsNone(motion)
+        self.assertEqual(robot["position"], [4.0, 0.0, 8.0])
+        self.assertEqual(robot["rotation"], [0.0, 0.5, 0.0])
+        self.assertEqual(robot["current_action"], "wave")
+
+    def test_full_rotation_normalizes_to_starting_direction(self):
+        robot = sample_robots()["robot_1"]
+
+        for current_time in range(4):
+            lambda_function.apply_robot_action(
+                robot, "turn_right", float(current_time)
+            )
+
+        self.assertAlmostEqual(robot["rotation"][1], 0.0)
+
+
 class ConnectionTests(unittest.TestCase):
     @patch.object(lambda_function, "connections_table")
     def test_connection_storage_and_query(self, connections_table):
@@ -303,7 +361,10 @@ class RestRoutingTests(unittest.TestCase):
             rest_event("/api/reset_robots", "POST")
         )
         self.assertEqual(reset["statusCode"], 200)
-        self.assertEqual(len(response_body(reset)["robots"]), len(lambda_function.DEFAULT_ROBOTS))
+        reset_robots = response_body(reset)["robots"]
+        self.assertEqual(len(reset_robots), len(lambda_function.DEFAULT_ROBOTS))
+        self.assertEqual(reset_robots["robot_1"]["position"], [-50, 0, 50])
+        self.assertEqual(reset_robots["robot_1"]["rotation"], [0.0, 0.0, 0.0])
 
     @patch.object(lambda_function, "handle_real_robot_commands")
     @patch.object(lambda_function, "post_to_connections")
@@ -349,6 +410,42 @@ class RestRoutingTests(unittest.TestCase):
             )
         )
         self.assertEqual(speech["statusCode"], 200)
+
+    @patch.object(lambda_function.time, "time", return_value=100.0)
+    @patch.object(lambda_function, "handle_real_robot_commands")
+    @patch.object(lambda_function, "post_to_connections")
+    @patch.object(lambda_function, "save_session_robots")
+    @patch.object(lambda_function, "get_session_robots")
+    def test_movement_route_persists_and_broadcasts_target_pose(
+        self,
+        get_robots,
+        save_robots,
+        post_connections,
+        handle_real,
+        time_mock,
+    ):
+        robots = sample_robots()
+        get_robots.return_value = robots
+
+        response = lambda_function.handle_rest_request(
+            rest_event(
+                "/run_action/robot_1",
+                "POST",
+                body={"action": "go_forward"},
+            )
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(robots["robot_1"]["position"], [0.0, 0.0, 30.0])
+        save_robots.assert_called_once_with("session", robots)
+        action_event = post_connections.call_args_list[0].args[2]
+        self.assertEqual(action_event["type"], "actions")
+        self.assertEqual(
+            action_event["data"]["motions"]["robot_1"]["target_position"],
+            [0.0, 0.0, 30.0],
+        )
+        self.assertEqual(action_event["data"]["action_ids"]["robot_1"], 1)
+        self.assertEqual(post_connections.call_args_list[1].args[2]["type"], "robot_states")
 
     @patch.object(lambda_function, "post_to_connections")
     def test_video_routes(self, post_connections):
@@ -515,6 +612,55 @@ class RealRobotAndWebSocketTests(unittest.TestCase):
         invoke({"action": "control_video", "action": "rewind"})
         invoke({"action": "camera_control", "x": 1})
 
+    @patch.object(lambda_function.time, "time", return_value=100.0)
+    @patch.object(lambda_function, "handle_real_robot_commands")
+    @patch.object(lambda_function, "post_to_connections")
+    @patch.object(lambda_function, "post_to_single_connection")
+    @patch.object(lambda_function, "save_session_robots")
+    @patch.object(lambda_function, "get_session_robots")
+    @patch.object(lambda_function, "save_connection")
+    def test_websocket_movement_uses_action_name_and_broadcasts_motion(
+        self,
+        save_connection,
+        get_robots,
+        save_robots,
+        post_single,
+        post_connections,
+        handle_real,
+        time_mock,
+    ):
+        robots = sample_robots()
+        get_robots.return_value = robots
+        event = {
+            "requestContext": {
+                "routeKey": "$default",
+                "domainName": "socket.example",
+                "stage": "prod",
+            },
+            "body": json.dumps(
+                {
+                    "action": "robot_action",
+                    "action_name": "turn_right",
+                    "robot_id": "robot_1",
+                    "session_key": "session",
+                }
+            ),
+        }
+
+        response = lambda_function.handle_websocket_event(event, "connection")
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(robots["robot_1"]["current_action"], "turn_right")
+        self.assertAlmostEqual(robots["robot_1"]["rotation"][1], 1.5707963268)
+        action_event = post_connections.call_args_list[0].args[2]
+        self.assertEqual(action_event["type"], "actions")
+        self.assertAlmostEqual(
+            action_event["data"]["motions"]["robot_1"]["target_rotation"][1],
+            1.5707963268,
+        )
+        self.assertEqual(action_event["data"]["action_ids"]["robot_1"], 1)
+        self.assertEqual(post_connections.call_args_list[1].args[2]["type"], "robot_states")
+
     def test_websocket_unknown_route_and_lambda_error(self):
         self.assertEqual(
             lambda_function.handle_websocket_event(
@@ -530,4 +676,3 @@ class RealRobotAndWebSocketTests(unittest.TestCase):
         ):
             result = lambda_function.lambda_handler({}, None)
         self.assertEqual(result["statusCode"], 500)
-
