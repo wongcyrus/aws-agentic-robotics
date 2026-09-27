@@ -7,3 +7,4 @@ node_modules
 .cdk.staging
 cdk.out
 output.json
+output-domain-v2.json
