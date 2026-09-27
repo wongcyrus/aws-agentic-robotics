@@ -1,6 +1,7 @@
 import type { GestureName } from '../core/catalog';
 import type { PlayerRole } from '../core/protocol';
 import type { TokenProvider } from './auth';
+import type { CommentaryResponse } from './commentary';
 
 export class ApiClient {
   constructor(private readonly baseUrl: string, private readonly tokens: TokenProvider) {}
@@ -19,21 +20,29 @@ export class ApiClient {
   triggerTechnique(robotId: string, technique: string, sessionKey: string) {
     return this.request('/api/trigger-technique', { method: 'POST', body: JSON.stringify({ robotId, technique, sessionKey }) });
   }
+  registerRoom(sessionId: string, roomCode: string, signalingUrl: string) {
+    return this.request('/api/register-room', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, roomCode, signalingUrl })
+    });
+  }
   commentary(path: '/api/live-status' | '/api/battle-result', body: Record<string, unknown>) {
-    return this.request<{ commentary?: string; audio?: string }>(path, { method: 'POST', body: JSON.stringify(body) });
+    return this.request<CommentaryResponse>(path, { method: 'POST', body: JSON.stringify(body) });
   }
   uploadSnapshot(sessionId: string, role: PlayerRole, phase: 'START' | 'END', image: string) {
     return this.request('/api/webcam-upload', { method: 'POST', body: JSON.stringify({ sessionId, role, phase, image }) });
   }
-  snapshotUrl(sessionId: string, role: PlayerRole) {
-    return `${this.baseUrl.replace(/\/$/, '')}/api/get-snapshot?sessionId=${encodeURIComponent(sessionId)}&role=${role}`;
+  getSnapshot(sessionId: string, role: PlayerRole) {
+    return this.request<{ success: boolean; image?: string; message?: string }>(
+      `/api/get-snapshot?sessionId=${encodeURIComponent(sessionId)}&role=${role}`
+    );
   }
-  enhancePortrait(sessionId: string, winner: PlayerRole | 'draw', domain?: GestureName | null) {
-    return this.request<{ jobId?: string; imageUrl?: string }>('/api/enhance-portrait', {
-      method: 'POST', body: JSON.stringify({ sessionId, winner, domain })
+  enhancePortrait(sessionId: string, winner: PlayerRole | 'draw', domain?: GestureName | null, templateId = 'random') {
+    return this.request<{ success?: boolean; status?: string; url?: string; imageUrl?: string }>('/api/enhance-portrait', {
+      method: 'POST', body: JSON.stringify({ sessionId, winner, domain, templateId })
     });
   }
   checkEnhancement(sessionId: string) {
-    return this.request<{ status: string; imageUrl?: string }>(`/api/check-enhancement?sessionId=${encodeURIComponent(sessionId)}`);
+    return this.request<{ status: string; url?: string; imageUrl?: string }>(`/api/check-enhancement?sessionId=${encodeURIComponent(sessionId)}`);
   }
 }

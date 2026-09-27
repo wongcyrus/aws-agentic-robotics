@@ -81,6 +81,7 @@ def _default_state(room_id: str, now_ms: int) -> dict[str, Any]:
             "countdownSeconds": 3,
             "scoreGraceMs": 1000,
             "synchronizedGestures": False,
+            "captureSnapshots": True,
         },
         "players": {
             "player1": _default_player(),
@@ -218,6 +219,7 @@ def _apply_command(
         countdown = max(0, min(30, int(requested.get("countdownSeconds", 3))))
         score_grace = max(0, min(5000, int(requested.get("scoreGraceMs", 1000))))
         synchronized = bool(requested.get("synchronizedGestures", False))
+        capture_snapshots = bool(requested.get("captureSnapshots", True))
 
         state["matchId"] = _new_id("match")
         state["phase"] = "countdown"
@@ -227,6 +229,7 @@ def _apply_command(
             "countdownSeconds": countdown,
             "scoreGraceMs": score_grace,
             "synchronizedGestures": synchronized,
+            "captureSnapshots": capture_snapshots,
         }
         state["winner"] = None
         state["pendingWinner"] = None

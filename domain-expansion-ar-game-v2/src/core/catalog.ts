@@ -16,6 +16,34 @@ export type GestureName = (typeof gestures)[number]['name'];
 export const gestureNames = gestures.map(({ name }) => name) as GestureName[];
 export const getGesture = (name?: string | null) => gestures.find((gesture) => gesture.name === name);
 
+const localizedNames: Record<'zh-HK' | 'zh-TW' | 'en' | 'ja', Partial<Record<GestureName, string>>> = {
+  'zh-HK': {
+    'Unlimited Void': '無量空處', 'Malevolent Shrine': '伏魔御廚子',
+    'Self-Embodiment of Perfection': '自閉圓頓裹', 'Authentic Mutual Love': '真贋相愛',
+    'Idle Death Gamble': '坐殺博徒', 'Yuji Itadori': '虎杖悠仁的領域',
+    'Chimera Shadow Garden': '嵌合暗翳庭', 'Time Cell Moon Palace': '時胞月宮殿',
+    'Lapse Blue': '術式順轉・蒼', 'Reversal Red': '術式反轉・赫', 'Hollow Purple': '虛式・茈'
+  },
+  'zh-TW': {
+    'Unlimited Void': '無量空處', 'Malevolent Shrine': '伏魔御廚子',
+    'Self-Embodiment of Perfection': '自閉圓頓裹', 'Authentic Mutual Love': '真贋相愛',
+    'Idle Death Gamble': '坐殺博徒', 'Yuji Itadori': '虎杖悠仁的領域',
+    'Chimera Shadow Garden': '嵌合暗翳庭', 'Time Cell Moon Palace': '時胞月宮殿',
+    'Lapse Blue': '術式順轉・蒼', 'Reversal Red': '術式反轉・赫', 'Hollow Purple': '虛式・茈'
+  },
+  en: {},
+  ja: {
+    'Unlimited Void': '無量空処', 'Malevolent Shrine': '伏魔御厨子',
+    'Self-Embodiment of Perfection': '自閉円頓裹', 'Authentic Mutual Love': '真贋相愛',
+    'Idle Death Gamble': '坐殺博徒', 'Yuji Itadori': '虎杖悠仁の領域',
+    'Chimera Shadow Garden': '嵌合暗翳庭', 'Time Cell Moon Palace': '時胞月宮殿',
+    'Lapse Blue': '術式順転・蒼', 'Reversal Red': '術式反転・赫', 'Hollow Purple': '虚式・茈'
+  }
+};
+
+export const gestureLabel = (name: GestureName | null, language: keyof typeof localizedNames) =>
+  name ? localizedNames[language][name] ?? name : null;
+
 export function shuffledGestures(count: number, random = Math.random): GestureName[] {
   return [...gestureNames].sort(() => random() - 0.5).slice(0, Math.max(1, Math.min(count, gestures.length)));
 }

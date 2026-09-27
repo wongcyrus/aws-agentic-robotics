@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gestures, shuffledGestures } from '../core/catalog';
+import { gestureLabel, gestures, shuffledGestures } from '../core/catalog';
 
 describe('gesture catalog', () => {
   it('keeps all techniques unique and mapped to media and robot actions', () => {
@@ -10,5 +10,9 @@ describe('gesture catalog', () => {
   it('clamps requested match size', () => {
     expect(shuffledGestures(99, () => .5)).toHaveLength(11);
     expect(shuffledGestures(0, () => .5)).toHaveLength(1);
+  });
+  it('localizes gesture labels without changing protocol names', () => {
+    expect(gestureLabel('Hollow Purple', 'zh-HK')).toBe('虛式・茈');
+    expect(gestureLabel('Hollow Purple', 'en')).toBe('Hollow Purple');
   });
 });

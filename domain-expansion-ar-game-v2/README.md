@@ -4,16 +4,21 @@ Independent React + TypeScript + Vite rewrite of the AR player, battle viewer, p
 
 ## Architecture
 
-- `index.html`: player camera, MediaPipe gesture recognition, VFX, scoring, robot calls.
-- `battle.html`: authoritative room view, WebRTC streams, match controls, cinematic/results, commentary.
+- `index.html`: player camera, MediaPipe gesture recognition, VFX, authoritative battle scoring, standalone solo rounds, configurable playback, and throttled robot calls.
+- `battle.html`: authoritative room view, WebRTC streams, match controls, configurable rules/layout, score-grace cinematics, event commentary, browser/Polly TTS, and results.
 - `player.html`: origin-validated popup media surface.
-- `share.html`: snapshots and portrait enhancement.
+- `share.html`: resolved snapshot images, portrait enhancement status, download, and Web Share/clipboard actions.
 - `src/core/protocol.ts`: typed Zod wire protocol with runtime validation.
 - `src/services/controlTransport.ts`: native WebSocket control transport.
 - `src/services/webrtcSession.ts`: isolated WebRTC signaling/session service.
 - `dev-server.mjs`: localhost online coordinator with deadline-based match state.
 
-V2 is **online-only**. It contains no `BroadcastChannel`, same-browser local coordinator, or Socket.IO fallback. Multiple tabs can still be used for development, but they communicate through the WebSocket coordinator exactly like separate devices.
+V2 battle mode is **WebSocket-authoritative only**. It contains no
+`BroadcastChannel`, same-browser local coordinator, or Socket.IO fallback.
+Multiple tabs can still be used for development, but they communicate through
+the WebSocket coordinator exactly like separate devices. The standalone solo
+mini-game remains available on the player page and does not emulate a
+multiplayer coordinator.
 
 The WebSocket wire format is protocol `2.0`: the client joins with
 `{action:"join",roomId,role,clientId}`, wraps authoritative commands in
@@ -72,7 +77,7 @@ Replace `public/config.json` at deployment time:
 }
 ```
 
-The API client explicitly adds a stored Cognito ID token to its own requests. It never patches global `fetch`. Supported surfaces are `/api/trigger-technique`, `/api/live-status`, `/api/battle-result`, `/api/webcam-upload`, `/api/get-snapshot`, `/api/enhance-portrait`, and `/api/check-enhancement`.
+The API client explicitly adds a stored Cognito ID token to its own requests. It never patches global `fetch`. Supported surfaces are `/api/register-room`, `/api/trigger-technique`, `/api/live-status`, `/api/battle-result`, `/api/webcam-upload`, `/api/get-snapshot`, `/api/enhance-portrait`, and `/api/check-enhancement`.
 
 The production WebSocket coordinator must implement the schemas in `src/core/protocol.ts`. WebRTC media is peer-to-peer; only offers, answers, and ICE candidates use the control socket.
 

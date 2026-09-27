@@ -4,7 +4,7 @@ import type { MatchState } from '../core/protocol';
 
 const state = (revision = 0): MatchState => ({
   protocolVersion: '2.0', roomId: 'BTL1', matchId: 'match-1', revision, phase: 'playing',
-  config: { difficultySeconds: 8, challengeCount: 1, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: true },
+  config: { difficultySeconds: 8, challengeCount: 1, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: true, captureSnapshots: true },
   players: {
     player1: { connected: true, clientId: 'p1', score: 0, attempted: 0, finished: false, challenge: { challengeId: 'c1', technique: 'Hollow Purple', startedAt: 1000, deadlineAt: 9000, pausedRemainingMs: null } },
     player2: { connected: true, clientId: 'p2', score: 0, attempted: 0, finished: false, challenge: null }

@@ -115,6 +115,7 @@ def command(
                 "messageType": message_type,
                 "roomId": "ROOM",
                 "matchId": match_id,
+                "revision": sessions.items.get("v2-room:ROOM", {}).get("revision", 0),
                 "payload": payload,
             },
         },
@@ -143,6 +144,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
                 "countdownSeconds": 0,
                 "scoreGraceMs": 1000,
                 "synchronizedGestures": True,
+                "captureSnapshots": False,
             }
         },
         "viewer",
@@ -155,6 +157,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
     state = sessions.items["v2-room:ROOM"]
     match_id = state["matchId"]
     assert state["phase"] == "countdown"
+    assert state["config"]["captureSnapshots"] is False
 
     response = command(
         "match.countdownCompleted",

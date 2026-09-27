@@ -58,7 +58,8 @@ export const MatchStateSchema = z.object({
     challengeCount: z.number().int().min(1).max(100),
     countdownSeconds: z.number().int().min(0).max(30),
     scoreGraceMs: z.number().int().min(0).max(5000),
-    synchronizedGestures: z.boolean()
+    synchronizedGestures: z.boolean(),
+    captureSnapshots: z.boolean().default(true)
   }),
   players: z.object({ player1: PlayerStateSchema, player2: PlayerStateSchema }),
   countdownEndsAt: z.number().int().nullable(),

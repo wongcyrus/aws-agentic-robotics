@@ -21,7 +21,14 @@ const id = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const emptyPlayer = () => ({ connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null });
 const newState = (roomId) => ({
   protocolVersion: '2.0', roomId, matchId: null, revision: 0, phase: 'idle',
-  config: { difficultySeconds: 8, challengeCount: 11, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: false },
+  config: {
+    difficultySeconds: 8,
+    challengeCount: 11,
+    countdownSeconds: 3,
+    scoreGraceMs: 1000,
+    synchronizedGestures: false,
+    captureSnapshots: true
+  },
   players: { player1: emptyPlayer(), player2: emptyPlayer() },
   challengeLists: { player1: [], player2: [] },
   countdownEndsAt: null, resolution: null, cinematic: null, winner: null, pendingWinner: null,
@@ -122,7 +129,8 @@ wss.on('connection', (ws) => {
         challengeCount: Math.max(1, Math.min(100, Number(config.challengeCount) || 11)),
         countdownSeconds: Math.max(0, Math.min(30, Number(config.countdownSeconds) || 0)),
         scoreGraceMs: Math.max(0, Math.min(5000, Number(config.scoreGraceMs) || 0)),
-        synchronizedGestures: Boolean(config.synchronizedGestures)
+        synchronizedGestures: Boolean(config.synchronizedGestures),
+        captureSnapshots: config.captureSnapshots !== false
       };
       const shared = Array.from({ length: Math.ceil(state.config.challengeCount / techniques.length) }, shuffle).flat().slice(0, state.config.challengeCount);
       state.challengeLists.player1 = shared;

@@ -14,7 +14,7 @@ describe('protocol validation', () => {
   it('accepts a valid room snapshot and rejects legacy messages', () => {
     const state = {
       protocolVersion: '2.0', roomId: 'BTL1', matchId: null, revision: 1, phase: 'idle',
-      config: { difficultySeconds: 8, challengeCount: 11, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: false },
+      config: { difficultySeconds: 8, challengeCount: 11, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: false, captureSnapshots: true },
       players: {
         player1: { connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null },
         player2: { connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null }
@@ -26,5 +26,21 @@ describe('protocol validation', () => {
       matchId: null, revision: 1, sentAt: 1000, payload: { state }
     })?.messageType).toBe('room.snapshot');
     expect(parseServerEnvelope({ type: 'state_update', data: state })).toBeNull();
+  });
+  it('defaults snapshot capture for protocol 2.0 states created before the option existed', () => {
+    const state = {
+      protocolVersion: '2.0', roomId: 'BTL1', matchId: null, revision: 1, phase: 'idle',
+      config: { difficultySeconds: 8, challengeCount: 11, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: false },
+      players: {
+        player1: { connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null },
+        player2: { connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null }
+      },
+      countdownEndsAt: null, resolution: null, cinematic: null, winner: null, pendingWinner: null, updatedAt: 1000
+    };
+    const parsed = parseServerEnvelope({
+      protocolVersion: '2.0', messageId: 'event-1', messageType: 'room.snapshot', roomId: 'BTL1',
+      matchId: null, revision: 1, sentAt: 1000, payload: { state }
+    });
+    expect(parsed?.messageType === 'room.snapshot' && parsed.payload.state.config.captureSnapshots).toBe(true);
   });
 });
