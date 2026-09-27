@@ -10,6 +10,7 @@ class Robot3D {
     constructor(robotData) {
         this.robotId = robotData.robot_id;
         this.color = robotData.color || '#4A90E2';
+        this.lastActionId = Number(robotData.movement_count) || 0;
 
         // FORCE position handling - multiple fallbacks
         this.position = this.parsePosition(robotData.position);
@@ -313,11 +314,20 @@ class Robot3D {
     }
 
     // Start action with animation
-    startAction(action = 'idle') {
+    startAction(action = 'idle', motion = null, actionId = null) {
+        const numericActionId = Number(actionId);
+        if (Number.isFinite(numericActionId)) {
+            if (numericActionId <= this.lastActionId) {
+                console.log(`Skipping stale action ${numericActionId} for ${this.robotId}`);
+                return;
+            }
+            this.lastActionId = numericActionId;
+        }
+
         console.log(`🎬 ${this.robotId} starting action: ${action}`);
 
         if (this.animator) {
-            this.animator.startAnimation(action);
+            this.animator.startAnimation(action, motion);
         } else {
             console.warn(`⚠️ No animator available for ${this.robotId}`);
         }
@@ -351,9 +361,9 @@ class Robot3D {
             this.group.rotation.set(this.rotation.x, this.rotation.y, this.rotation.z);
         }
 
-        // Start action if provided and different from current
-        if (robotData.current_action && robotData.current_action !== 'idle') {
-            this.startAction(robotData.current_action);
+        const serverActionId = Number(robotData.movement_count);
+        if (Number.isFinite(serverActionId)) {
+            this.lastActionId = Math.max(this.lastActionId, serverActionId);
         }
 
         // Ensure still visible after update
@@ -1110,21 +1120,25 @@ class Scene3D {
     }
 
     // Trigger action on specific robot
-    triggerRobotAction(robotId, action) {
+    triggerRobotAction(robotId, action, motion = null, actionId = null) {
         const robot = this.robots.get(robotId);
         if (robot) {
             console.log(`🎬 Triggering action ${action} on ${robotId}`);
-            robot.startAction(action);
+            robot.startAction(action, motion, actionId);
         } else {
             console.warn(`⚠️ Robot ${robotId} not found for action ${action}`);
         }
     }
 
     // Trigger action on all robots
-    triggerAllRobotsAction(action) {
+    triggerAllRobotsAction(action, motions = {}, actionIds = {}) {
         console.log(`🎬 Triggering action ${action} on ALL robots`);
         this.robots.forEach((robot, robotId) => {
-            robot.startAction(action);
+            robot.startAction(
+                action,
+                motions[robotId] || null,
+                actionIds[robotId] ?? null
+            );
         });
     }
 

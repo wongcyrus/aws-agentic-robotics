@@ -15,6 +15,8 @@ class RobotAnimator {
         this.animationStartTime = 0;
         this.animationDuration = 2000; // Default 2 seconds
         this.currentAnimation = null;
+        this.animationStartPosition = null;
+        this.animationTargetPosition = null;
 
         // Action duration mapping (synchronized with backend timing)
         this.actionDurations = {
@@ -105,12 +107,20 @@ class RobotAnimator {
         });
     }
 
-    startAnimation(action) {
+    startAnimation(action, motion = null) {
         console.log(`🎭 Starting animation: ${action} for ${this.robot.robotId}`);
 
         this.currentAnimation = action;
         this.isAnimating = true;
         this.animationStartTime = Date.now();
+        this.animationStartPosition = {
+            x: this.robot.group.position.x,
+            y: this.robot.group.position.y,
+            z: this.robot.group.position.z
+        };
+        this.animationTargetPosition = motion && motion.target_position
+            ? this.robot.parsePosition(motion.target_position)
+            : null;
 
         // Set the correct duration for this action
         const actionKey = action.toLowerCase();
@@ -119,7 +129,7 @@ class RobotAnimator {
         console.log(`⏱️ Animation duration: ${this.animationDuration / 1000} seconds for ${action}`);
 
         // Store the robot's current facing direction at animation start
-        this.animationStartRotation = this.robot.rotation.y || this.robot.group.rotation.y || 0;
+        this.animationStartRotation = this.robot.group.rotation.y || 0;
 
         // Initialize animation-specific properties based on action type
         this.initializeAnimationProperties(action);
@@ -802,20 +812,19 @@ class RobotAnimator {
             rightArm.rotation.x = Math.sin(walkCycle) * 0.3;
         }
 
-        // CORRECTED: Move forward based on robot's current rotation
-        const moveDistance = 30;
-        const currentMove = progress * moveDistance;
-
-        // Get robot's current Y rotation to determine forward direction
-        const currentRotation = this.robot.group.rotation.y;
-
-        // Calculate forward direction based on rotation
-        const forwardX = Math.sin(currentRotation) * currentMove;
-        const forwardZ = Math.cos(currentRotation) * currentMove;
-
-        // Apply movement in the correct direction
-        this.robot.group.position.x = this.robot.position.x + forwardX;
-        this.robot.group.position.z = this.robot.position.z + forwardZ;
+        const currentRotation = this.animationStartRotation;
+        if (this.animationTargetPosition) {
+            this.robot.group.position.x = this.animationStartPosition.x
+                + (this.animationTargetPosition.x - this.animationStartPosition.x) * progress;
+            this.robot.group.position.z = this.animationStartPosition.z
+                + (this.animationTargetPosition.z - this.animationStartPosition.z) * progress;
+        } else {
+            const currentMove = progress * 30;
+            const forwardX = Math.sin(currentRotation) * currentMove;
+            const forwardZ = Math.cos(currentRotation) * currentMove;
+            this.robot.group.position.x = this.animationStartPosition.x + forwardX;
+            this.robot.group.position.z = this.animationStartPosition.z + forwardZ;
+        }
 
         console.log(`🚶 ${this.robot.robotId} forward: x=${this.robot.group.position.x}, z=${this.robot.group.position.z}, rotation=${currentRotation}`);
     }
@@ -1065,6 +1074,8 @@ class RobotAnimator {
             }, resetDelay);
         }
 
+        this.animationStartPosition = null;
+        this.animationTargetPosition = null;
         this.currentAnimation = null;
     }
 
@@ -1705,12 +1716,19 @@ class RobotAnimator {
             torso.rotation.z = -0.1; // Lean right
 
             // Actually move right (relative to robot's facing direction)
-            const currentMove = progress * 25;
-            const currentRotation = this.robot.group.rotation.y;
-            const rightX = -Math.cos(currentRotation) * currentMove;
-            const rightZ = Math.sin(currentRotation) * currentMove;
-            this.robot.group.position.x = this.robot.position.x + rightX;
-            this.robot.group.position.z = this.robot.position.z + rightZ;
+            if (this.animationTargetPosition) {
+                this.robot.group.position.x = this.animationStartPosition.x
+                    + (this.animationTargetPosition.x - this.animationStartPosition.x) * progress;
+                this.robot.group.position.z = this.animationStartPosition.z
+                    + (this.animationTargetPosition.z - this.animationStartPosition.z) * progress;
+            } else {
+                const currentMove = progress * 25;
+                const currentRotation = this.animationStartRotation;
+                const rightX = -Math.cos(currentRotation) * currentMove;
+                const rightZ = Math.sin(currentRotation) * currentMove;
+                this.robot.group.position.x = this.animationStartPosition.x + rightX;
+                this.robot.group.position.z = this.animationStartPosition.z + rightZ;
+            }
         }
     }
 
@@ -1726,12 +1744,19 @@ class RobotAnimator {
             torso.rotation.z = 0.1; // Lean left
 
             // Actually move left (relative to robot's facing direction)
-            const currentMove = progress * 25;
-            const currentRotation = this.robot.group.rotation.y;
-            const leftX = Math.cos(currentRotation) * currentMove;
-            const leftZ = -Math.sin(currentRotation) * currentMove;
-            this.robot.group.position.x = this.robot.position.x + leftX;
-            this.robot.group.position.z = this.robot.position.z + leftZ;
+            if (this.animationTargetPosition) {
+                this.robot.group.position.x = this.animationStartPosition.x
+                    + (this.animationTargetPosition.x - this.animationStartPosition.x) * progress;
+                this.robot.group.position.z = this.animationStartPosition.z
+                    + (this.animationTargetPosition.z - this.animationStartPosition.z) * progress;
+            } else {
+                const currentMove = progress * 25;
+                const currentRotation = this.animationStartRotation;
+                const leftX = Math.cos(currentRotation) * currentMove;
+                const leftZ = -Math.sin(currentRotation) * currentMove;
+                this.robot.group.position.x = this.animationStartPosition.x + leftX;
+                this.robot.group.position.z = this.animationStartPosition.z + leftZ;
+            }
         }
     }
 
@@ -1750,12 +1775,19 @@ class RobotAnimator {
             rightArm.rotation.x = -Math.sin(backTime) * 0.2;
 
             // Actually move backward fast
-            const currentMove = progress * 35;
-            const currentRotation = this.robot.group.rotation.y;
-            const backwardX = -Math.sin(currentRotation) * currentMove;
-            const backwardZ = -Math.cos(currentRotation) * currentMove;
-            this.robot.group.position.x = this.robot.position.x + backwardX;
-            this.robot.group.position.z = this.robot.position.z + backwardZ;
+            if (this.animationTargetPosition) {
+                this.robot.group.position.x = this.animationStartPosition.x
+                    + (this.animationTargetPosition.x - this.animationStartPosition.x) * progress;
+                this.robot.group.position.z = this.animationStartPosition.z
+                    + (this.animationTargetPosition.z - this.animationStartPosition.z) * progress;
+            } else {
+                const currentMove = progress * 35;
+                const currentRotation = this.animationStartRotation;
+                const backwardX = -Math.sin(currentRotation) * currentMove;
+                const backwardZ = -Math.cos(currentRotation) * currentMove;
+                this.robot.group.position.x = this.animationStartPosition.x + backwardX;
+                this.robot.group.position.z = this.animationStartPosition.z + backwardZ;
+            }
         }
     }
 

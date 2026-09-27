@@ -555,7 +555,7 @@ class HumanoidSimulator {
     }
 
     // Trigger action locally for immediate feedback
-    triggerLocalAction(robotId, action) {
+    triggerLocalAction(robotId, action, motions = {}, actionIds = {}) {
         console.log(`🎭 Triggering LOCAL action: ${action} for ${robotId}`);
 
         if (!this.scene3d) {
@@ -565,10 +565,15 @@ class HumanoidSimulator {
 
         if (robotId === 'all') {
             // Trigger action on all robots
-            this.scene3d.triggerAllRobotsAction(action);
+            this.scene3d.triggerAllRobotsAction(action, motions, actionIds);
         } else {
             // Trigger action on specific robot
-            this.scene3d.triggerRobotAction(robotId, action);
+            this.scene3d.triggerRobotAction(
+                robotId,
+                action,
+                motions[robotId] || null,
+                actionIds[robotId] ?? null
+            );
         }
     }
 
@@ -895,6 +900,8 @@ class HumanoidSimulator {
 
         const actionName = data.action_name || 'stand';
         const robotId = data.robot_id || 'all';
+        const motions = data.motions || {};
+        const actionIds = data.action_ids || {};
 
         // Check if this is a speech action with an audio URL
         if (actionName === 'speech' && data.audio_url) {
@@ -903,7 +910,7 @@ class HumanoidSimulator {
         }
 
         // Execute the action LOCALLY only - don't send back to server to avoid loop
-        this.triggerLocalAction(robotId, actionName);
+        this.triggerLocalAction(robotId, actionName, motions, actionIds);
 
         // Show notification about server-initiated action
         this.showNotification(`Server executed "${actionName}" on ${robotId}`, 'info');
