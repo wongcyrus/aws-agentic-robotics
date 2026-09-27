@@ -33,6 +33,7 @@ jobs:
           cache-dependency-path: |
             cdk/package-lock.json
             domain-expansion-ar-game/package-lock.json
+            domain-expansion-ar-game-v2/package-lock.json
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -41,6 +42,7 @@ jobs:
         run: |
           npm ci --prefix cdk
           npm ci --prefix domain-expansion-ar-game
+          npm ci --prefix domain-expansion-ar-game-v2
 
       - name: Run static checks
         run: ./scripts/lint.sh

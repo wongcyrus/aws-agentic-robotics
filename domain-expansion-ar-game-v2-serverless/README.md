@@ -17,5 +17,13 @@ Run the backend tests from the repository root:
 ```bash
 python3 -m venv /tmp/domain-v2-venv
 /tmp/domain-v2-venv/bin/pip install -r domain-expansion-ar-game-v2-serverless/backend/requirements-dev.txt
-/tmp/domain-v2-venv/bin/pytest -q domain-expansion-ar-game-v2-serverless/backend/tests
+(
+  cd domain-expansion-ar-game-v2-serverless/backend
+  /tmp/domain-v2-venv/bin/pytest -q \
+    --cov=. \
+    --cov-branch \
+    --cov-config=../../.coveragerc \
+    --cov-fail-under=80 \
+    --cov-report=term-missing
+)
 ```

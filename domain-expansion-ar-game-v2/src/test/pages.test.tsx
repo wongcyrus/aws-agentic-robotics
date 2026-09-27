@@ -1,0 +1,275 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { defaultSettings } from '../services/settings';
+import type { MatchState } from '../core/protocol';
+
+const command = vi.fn();
+const signal = vi.fn();
+const subscribe = vi.fn(() => vi.fn());
+let gameState: MatchState | null = null;
+const api = {
+  triggerTechnique: vi.fn(),
+  registerRoom: vi.fn(),
+  commentary: vi.fn(),
+  uploadSnapshot: vi.fn(),
+  getSnapshot: vi.fn(),
+  enhancePortrait: vi.fn(),
+  checkEnhancement: vi.fn()
+};
+const cameraStart = vi.fn();
+const cameraStop = vi.fn();
+const playerReady = vi.fn();
+const viewerRequested = vi.fn();
+const handleSignal = vi.fn();
+const closePeers = vi.fn();
+
+vi.mock('../services/useGameSession', () => ({
+  useGameSession: () => ({
+    state: gameState,
+    status: 'connected',
+    config: {
+      apiBaseUrl: 'https://api.test',
+      webSocketUrl: 'wss://socket.test',
+      defaultSessionKey: 'key'
+    },
+    command,
+    signal,
+    subscribe
+  })
+}));
+vi.mock('../services/apiClient', () => ({
+  ApiClient: class {
+    triggerTechnique = api.triggerTechnique;
+    registerRoom = api.registerRoom;
+    commentary = api.commentary;
+    uploadSnapshot = api.uploadSnapshot;
+    getSnapshot = api.getSnapshot;
+    enhancePortrait = api.enhancePortrait;
+    checkEnhancement = api.checkEnhancement;
+  }
+}));
+vi.mock('../services/config', () => ({
+  loadConfig: () => Promise.resolve({ apiBaseUrl: 'https://api.test' })
+}));
+vi.mock('../adapters/mediaPipeCamera', () => ({
+  MediaPipeCameraAdapter: class { start = cameraStart; stop = cameraStop; }
+}));
+vi.mock('../adapters/vfx', () => ({
+  CanvasVfxAdapter: class { initialize = vi.fn().mockResolvedValue(undefined); draw = vi.fn(); }
+}));
+vi.mock('../adapters/gestureRecognizer', () => ({
+  StableGestureRecognizer: class { update = vi.fn(() => null); }
+}));
+vi.mock('../services/webrtcSession', () => ({
+  WebRtcSessionService: class {
+    playerReady = playerReady;
+    viewerRequested = viewerRequested;
+    handle = handleSignal;
+    close = closePeers;
+  }
+}));
+
+const makeState = (overrides: Partial<MatchState> = {}): MatchState => ({
+  protocolVersion: '2.0',
+  roomId: 'BTL1',
+  matchId: 'match-123',
+  revision: 1,
+  phase: 'idle',
+  config: {
+    difficultySeconds: 8,
+    challengeCount: 3,
+    countdownSeconds: 3,
+    scoreGraceMs: 1000,
+    synchronizedGestures: false,
+    captureSnapshots: true
+  },
+  players: {
+    player1: {
+      connected: true, clientId: 'p1', score: 1, attempted: 1, finished: false,
+      challenge: { challengeId: 'c1', technique: 'Lapse Blue', startedAt: Date.now(), deadlineAt: Date.now() + 5000 }
+    },
+    player2: {
+      connected: true, clientId: 'p2', score: 2, attempted: 2, finished: false,
+      challenge: { challengeId: 'c2', technique: 'Reversal Red', startedAt: Date.now(), deadlineAt: Date.now() + 5000 }
+    }
+  },
+  countdownEndsAt: null,
+  resolution: null,
+  cinematic: null,
+  winner: null,
+  pendingWinner: null,
+  updatedAt: Date.now(),
+  ...overrides
+});
+
+beforeEach(() => {
+  gameState = null;
+  command.mockReset();
+  signal.mockReset();
+  subscribe.mockClear();
+  Object.values(api).forEach((mock) => mock.mockReset());
+  cameraStart.mockReset().mockResolvedValue({ getTracks: () => [] });
+  cameraStop.mockReset();
+  playerReady.mockReset();
+  viewerRequested.mockReset();
+  handleSignal.mockReset();
+  history.replaceState({}, '', '/');
+  vi.stubGlobal('speechSynthesis', {
+    getVoices: vi.fn(() => [{ name: 'Gojo' }]),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    cancel: vi.fn(),
+    speak: vi.fn()
+  });
+  vi.stubGlobal('SpeechSynthesisUtterance', class {
+    lang = ''; volume = 1; voice: SpeechSynthesisVoice | null = null;
+    constructor(public text: string) {}
+  });
+});
+
+describe('MediaApp', () => {
+  it('enables the popup and responds to validated media messages', async () => {
+    const opener = { postMessage: vi.fn() } as unknown as Window;
+    Object.defineProperty(window, 'opener', { configurable: true, value: opener });
+    const { MediaApp } = await import('../pages/MediaApp');
+    const { container } = render(<MediaApp />);
+    fireEvent.click(screen.getByText('Click to enable audio/video'));
+    expect(opener.postMessage).toHaveBeenCalledWith({ type: 'PLAYER_READY' }, location.origin);
+    const video = container.querySelector('video')!;
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: location.origin,
+      source: opener,
+      data: { type: 'PLAY_VIDEO', videoSrc: '/clips/domain.mp4' }
+    }));
+    expect(video.src).toContain('/clips/domain.mp4');
+    expect(await screen.findByText('domain.mp4')).toBeTruthy();
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: location.origin,
+      source: opener,
+      data: { type: 'STOP_VIDEO' }
+    }));
+    expect(video.pause).toHaveBeenCalled();
+  });
+});
+
+describe('PlayerApp', () => {
+  it('renders online state, edits settings, starts and stops the camera', async () => {
+    gameState = makeState();
+    const { PlayerApp } = await import('../pages/PlayerApp');
+    render(<PlayerApp />);
+    expect(screen.getByText('術式順轉・蒼')).toBeTruthy();
+    expect(screen.getByText(/Score 1\/3/)).toBeTruthy();
+    fireEvent.click(screen.getByText('Start camera'));
+    await waitFor(() => expect(cameraStart).toHaveBeenCalled());
+    expect(playerReady).toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Stop'));
+    expect(cameraStop).toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'abcd' } });
+    expect(screen.getByDisplayValue('ABCD')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'player2' } });
+    expect(screen.getByDisplayValue('Player 2')).toBeTruthy();
+  });
+
+  it('runs solo controls and media popup behavior', async () => {
+    localStorage.setItem('domain-expansion-v2.settings', JSON.stringify({
+      ...defaultSettings, playerMode: 'solo', videoMode: 'popup', autoOpenPopup: false
+    }));
+    const popup = { focus: vi.fn(), closed: false, postMessage: vi.fn() } as unknown as Window;
+    vi.spyOn(window, 'open').mockReturnValue(popup);
+    const { PlayerApp } = await import('../pages/PlayerApp');
+    const { container } = render(<PlayerApp />);
+    fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'solo' } });
+    fireEvent.click(screen.getByText('Start round'));
+    expect(container.querySelector('.player-header p')?.textContent).toContain('Local solo round');
+    fireEvent.click(screen.getByText('Quit'));
+    expect(screen.getByText('ROUND STOPPED')).toBeTruthy();
+    fireEvent.click(screen.getByText('Open media popup'));
+    expect(window.open).toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Save settings'));
+    expect(localStorage.getItem('domain-expansion-v2.settings')).toContain('"playerMode":"solo"');
+  });
+});
+
+describe('BattleApp', () => {
+  it('renders lobby controls and starts a configured battle', async () => {
+    const { BattleApp } = await import('../pages/BattleApp');
+    render(<BattleApp />);
+    expect(screen.getByText('DOMAIN CLASH')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Countdown/), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText(/Layout/), { target: { value: 'vertical-stack' } });
+    fireEvent.click(screen.getByText('Start battle'));
+    expect(command).toHaveBeenCalledWith('match.start', expect.objectContaining({
+      config: expect.objectContaining({ countdownSeconds: 5 })
+    }));
+    fireEvent.click(screen.getByText('Reset defaults'));
+    expect(screen.getByText('Commentary is ready.')).toBeTruthy();
+  });
+
+  it('handles an active battle, WebRTC viewers and a cinematic', async () => {
+    gameState = makeState({
+      phase: 'cinematic',
+      cinematic: {
+        cinematicId: 'cin-1',
+        casts: [{ role: 'player1', technique: 'Lapse Blue', videoSrc: '/blue.mp4' }],
+        startedAt: Date.now(),
+        fallbackEndsAt: Date.now() + 60_000
+      }
+    });
+    const { BattleApp } = await import('../pages/BattleApp');
+    const { container } = render(<BattleApp />);
+    await waitFor(() => expect(viewerRequested).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByText('Stop / reset'));
+    expect(command).toHaveBeenCalledWith('match.reset');
+    fireEvent.ended(container.querySelector('.cinematic video')!);
+    expect(command).toHaveBeenCalledWith('cinematic.completed', { cinematicId: 'cin-1' });
+  });
+
+  it('shows results, skips video, and requests battle commentary', async () => {
+    api.commentary.mockResolvedValue({ commentary: 'Player one dominates!' });
+    gameState = makeState({ phase: 'ended', winner: 'PLAYER 1' });
+    const { BattleApp } = await import('../pages/BattleApp');
+    render(<BattleApp />);
+    await waitFor(() => expect(api.commentary).toHaveBeenCalledWith(
+      '/api/battle-result', expect.objectContaining({ winner: 'PLAYER 1' })
+    ));
+    fireEvent.click(screen.getByText('Skip result video'));
+    expect(screen.getByText('PLAYER 1 WINS')).toBeTruthy();
+    expect(screen.getByText(/PLAYER 1 1 · 2 PLAYER 2/)).toBeTruthy();
+    fireEvent.click(screen.getByText('Back to lobby'));
+    expect(command).toHaveBeenCalledWith('match.reset');
+  });
+});
+
+describe('ShareApp', () => {
+  it('loads captures, generates, downloads, and shares a portrait', async () => {
+    history.replaceState({}, '', '/share.html?session=match-1&winner=player1');
+    api.getSnapshot
+      .mockResolvedValueOnce({ success: true, image: 'https://img.test/p1.jpg' })
+      .mockResolvedValueOnce({ success: true, image: 'https://img.test/p2.jpg' });
+    api.enhancePortrait.mockResolvedValue({ imageUrl: 'https://img.test/portrait.jpg' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('image', { status: 200 })));
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) }
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const { ShareApp } = await import('../pages/ShareApp');
+    render(<ShareApp />);
+    await screen.findByAltText('player1 match capture');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ink-wash' } });
+    fireEvent.click(screen.getByText('Generate AI portrait'));
+    await screen.findByAltText('AI enhanced battle portrait');
+    expect(api.enhancePortrait).toHaveBeenCalledWith('match-1', 'player1', undefined, 'ink-wash');
+    fireEvent.click(screen.getByText('Download images'));
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Share result'));
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(location.href));
+  });
+
+  it('reports a missing session without calling the API', async () => {
+    const { ShareApp } = await import('../pages/ShareApp');
+    render(<ShareApp />);
+    expect(await screen.findByText('No match session was supplied.')).toBeTruthy();
+    expect(screen.getByText(/No session supplied/)).toBeTruthy();
+  });
+});

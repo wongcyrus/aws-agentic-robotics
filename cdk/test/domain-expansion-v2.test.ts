@@ -46,6 +46,7 @@ jest.mock("aws-cdk-lib/aws-s3-deployment", () => {
 });
 
 import { DomainExpansionV2ServerlessConstruct } from "../lib/construct/domain-expansion-v2-serverless";
+import { DomainExpansionV2Stack } from "../lib/domain-expansion-v2-stack";
 
 describe("DomainExpansionV2ServerlessConstruct", () => {
   beforeEach(() => {
@@ -129,5 +130,34 @@ describe("DomainExpansionV2ServerlessConstruct", () => {
     expect(templateJson).toContain("execute-api:ManageConnections");
     expect(templateJson).not.toContain("DomainExpansionConnections");
     expect(templateJson).not.toContain("DomainExpansionSessions");
+  });
+
+  test("stack wrapper exposes the V2 service outputs", () => {
+    const app = new App({ outdir: "cdk.out/jest-domain-v2-stack" });
+    const stack = new DomainExpansionV2Stack(app, "DomainV2StackTest", {
+      env: { account: "111122223333", region: "us-east-1" },
+      userPoolId: "us-east-1_example",
+      userPoolClientId: "client-id",
+      commentatorRuntimeArn:
+        "arn:aws:bedrock-agentcore:us-east-1:111122223333:runtime/commentator",
+      openClawRuntimeArn:
+        "arn:aws:bedrock-agentcore:us-east-1:111122223333:runtime/openclaw",
+      robotApiEndpoint: "https://robot.example.test",
+      robotGatewayUrl: "https://gateway.example.test",
+    });
+
+    const template = Template.fromStack(stack);
+    template.hasOutput("DomainExpansionV2Url", {
+      Description: "Parallel Domain Expansion V2 website",
+    });
+    template.hasOutput("DomainExpansionV2WebSocketUrl", {
+      Description: "Domain Expansion V2 WebSocket endpoint",
+    });
+    template.hasOutput("DomainExpansionV2RestApiUrl", {
+      Description: "Domain Expansion V2 REST API endpoint",
+    });
+    template.hasOutput("DomainExpansionV2WebsiteBucket", {
+      Description: "Domain Expansion V2 website bucket",
+    });
   });
 });
