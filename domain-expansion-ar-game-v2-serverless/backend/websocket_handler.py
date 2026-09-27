@@ -31,6 +31,11 @@ TECHNIQUES = [
     "Hollow Purple",
 ]
 PLAYER_ROLES = {"player1", "player2"}
+MAX_STATE_WRITE_ATTEMPTS = 3
+
+
+class ConcurrentStateUpdate(RuntimeError):
+    pass
 
 
 def _normalize(value: Any) -> Any:
@@ -381,7 +386,7 @@ def handle_websocket_event(
     clock: Callable[[], float] = time.time,
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
-    connection_id = request_context.get("connectionId")
+    connection_id = str(request_context.get("connectionId") or "")
     route_key = request_context.get("routeKey")
     randomizer = rng or random.SystemRandom()
 
@@ -422,7 +427,7 @@ def handle_websocket_event(
             )
         except ClientError as error:
             if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                raise RuntimeError("Concurrent room update; retry command") from error
+                raise ConcurrentStateUpdate("Concurrent room update") from error
             raise
 
     def envelope(
@@ -472,11 +477,17 @@ def handle_websocket_event(
             room_id = record.get("room_code")
             role = record.get("role")
             if room_id and role in PLAYER_ROLES:
-                state = load_state(room_id)
-                expected_revision = state["revision"]
-                state["players"][role]["connected"] = False
-                state["players"][role]["clientId"] = None
-                save_state(state, expected_revision)
+                for attempt in range(MAX_STATE_WRITE_ATTEMPTS):
+                    state = load_state(room_id)
+                    expected_revision = state["revision"]
+                    state["players"][role]["connected"] = False
+                    state["players"][role]["clientId"] = None
+                    try:
+                        save_state(state, expected_revision)
+                        break
+                    except ConcurrentStateUpdate:
+                        if attempt == MAX_STATE_WRITE_ATTEMPTS - 1:
+                            raise
                 publish_snapshot(room_id, state)
         return {"statusCode": 200, "body": "Disconnected"}
 
@@ -504,12 +515,18 @@ def handle_websocket_event(
                     "ttl": int(clock()) + 86400,
                 }
             )
-            state = load_state(room_id)
-            expected_revision = state["revision"]
-            if role in PLAYER_ROLES:
-                state["players"][role]["connected"] = True
-                state["players"][role]["clientId"] = client_id
-            save_state(state, expected_revision)
+            for attempt in range(MAX_STATE_WRITE_ATTEMPTS):
+                state = load_state(room_id)
+                expected_revision = state["revision"]
+                if role in PLAYER_ROLES:
+                    state["players"][role]["connected"] = True
+                    state["players"][role]["clientId"] = client_id
+                try:
+                    save_state(state, expected_revision)
+                    break
+                except ConcurrentStateUpdate:
+                    if attempt == MAX_STATE_WRITE_ATTEMPTS - 1:
+                        raise
             publish_snapshot(room_id, state)
             return {"statusCode": 200, "body": "Joined"}
 
@@ -571,44 +588,53 @@ def handle_websocket_event(
         if not message_id or not isinstance(payload, dict):
             raise ValueError("Invalid command envelope")
 
-        state = load_state(room_id)
-        expected_revision = state["revision"]
-        if message_id in state["processedCommands"]:
-            post(
-                connection_id,
-                envelope(
-                    "command.acknowledged",
-                    room_id,
-                    state,
-                    {"duplicate": True},
-                    correlation_id=message_id,
-                ),
-            )
-            return {"statusCode": 200, "body": "Duplicate ignored"}
-        if (
-            state.get("matchId")
-            and command_type not in {"match.start", "match.reset"}
-            and command.get("matchId") != state.get("matchId")
-        ):
-            raise ValueError("Command match is stale")
+        command_time_ms = _now_ms(clock)
+        for attempt in range(MAX_STATE_WRITE_ATTEMPTS):
+            state = load_state(room_id)
+            expected_revision = state["revision"]
+            if message_id in state["processedCommands"]:
+                post(
+                    connection_id,
+                    envelope(
+                        "command.acknowledged",
+                        room_id,
+                        state,
+                        {"duplicate": True},
+                        correlation_id=message_id,
+                    ),
+                )
+                return {"statusCode": 200, "body": "Duplicate ignored"}
+            if (
+                state.get("matchId")
+                and command_type not in {"match.start", "match.reset"}
+                and command.get("matchId") != state.get("matchId")
+            ):
+                raise ValueError("Command match is stale")
 
-        _apply_command(
-            state,
-            command_type,
-            payload,
-            str(sender.get("role")),
-            _now_ms(clock),
-            randomizer,
-        )
-        state["processedCommands"][message_id] = int(clock())
-        if len(state["processedCommands"]) > 200:
-            oldest = sorted(
-                state["processedCommands"],
-                key=state["processedCommands"].get,
-            )[:50]
-            for old_message_id in oldest:
-                state["processedCommands"].pop(old_message_id, None)
-        save_state(state, expected_revision)
+            _apply_command(
+                state,
+                command_type,
+                payload,
+                str(sender.get("role")),
+                command_time_ms,
+                randomizer,
+            )
+            state["processedCommands"][message_id] = int(clock())
+            if len(state["processedCommands"]) > 200:
+                oldest = sorted(
+                    state["processedCommands"],
+                    key=state["processedCommands"].get,
+                )[:50]
+                for old_message_id in oldest:
+                    state["processedCommands"].pop(old_message_id, None)
+            try:
+                save_state(state, expected_revision)
+                break
+            except ConcurrentStateUpdate:
+                if attempt == MAX_STATE_WRITE_ATTEMPTS - 1:
+                    raise RuntimeError(
+                        "Concurrent room update exceeded retry limit"
+                    )
         publish_snapshot(room_id, state, message_id)
         return {"statusCode": 200, "body": "Command accepted"}
     except (TypeError, ValueError, RuntimeError) as error:
