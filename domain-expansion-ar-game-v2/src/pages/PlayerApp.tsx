@@ -8,7 +8,7 @@ import { StableGestureRecognizer } from '../adapters/gestureRecognizer';
 import { CanvasVfxAdapter } from '../adapters/vfx';
 import { ApiClient } from '../services/apiClient';
 import { LocalStorageTokenProvider } from '../services/auth';
-import { loadSettings, saveSettings } from '../services/settings';
+import { loadSettings, saveSettings, type Settings } from '../services/settings';
 import { useGameSession } from '../services/useGameSession';
 import { WebRtcSessionService } from '../services/webrtcSession';
 import { postToPopup, readPopupMessage } from '../services/popupMessaging';
@@ -27,11 +27,12 @@ const emptySoloRound: SoloRound = {
   active: false, score: 0, attempted: 0, queue: [], target: null, deadlineAt: null, result: null
 };
 
-export function PlayerApp() {
+export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<Settings> } = {}) {
   const query = new URLSearchParams(location.search);
   const [settings, setSettings] = useState(() => loadSettings({
     roomCode: (query.get('room') ?? undefined)?.toUpperCase(),
-    role: (query.get('role') as PlayerRole | null) ?? undefined
+    role: (query.get('role') as PlayerRole | null) ?? undefined,
+    ...initialSettings
   }));
   const { state, status, config, command, signal, subscribe } = useGameSession(settings.roomCode, settings.role);
   const videoRef = useRef<HTMLVideoElement>(null), canvasRef = useRef<HTMLCanvasElement>(null);

@@ -6,7 +6,7 @@ import { WebRtcSignalTypeSchema, type PlayerRole } from '../core/protocol';
 import { ApiClient } from '../services/apiClient';
 import { LocalStorageTokenProvider } from '../services/auth';
 import { CommentaryPlayer } from '../services/commentary';
-import { defaultSettings, loadSettings, saveSettings } from '../services/settings';
+import { defaultSettings, loadSettings, saveSettings, type Settings } from '../services/settings';
 import { useGameSession } from '../services/useGameSession';
 import { WebRtcSessionService } from '../services/webrtcSession';
 
@@ -18,9 +18,12 @@ const loseVideos = import.meta.env.DEV
   ? ['shiba1.mp4']
   : Array.from({ length: 9 }, (_, index) => `shiba${index + 1}.mp4`);
 
-export function BattleApp() {
+export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<Settings> } = {}) {
   const query = new URLSearchParams(location.search);
-  const [settings, setSettings] = useState(() => loadSettings({ roomCode: (query.get('room') ?? undefined)?.toUpperCase() }));
+  const [settings, setSettings] = useState(() => loadSettings({
+    roomCode: (query.get('room') ?? undefined)?.toUpperCase(),
+    ...initialSettings
+  }));
   const { state, status, config, command, signal, subscribe } = useGameSession(settings.roomCode, 'viewer');
   const [streams, setStreams] = useState<Partial<Record<PlayerRole, MediaStream>>>({});
   const [commentary, setCommentary] = useState('Commentary is ready.');
