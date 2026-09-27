@@ -1,0 +1,11 @@
+{
+  "protocolVersion": "2.0",
+  "webSocketUrl": "ws://localhost:5173/control",
+  "apiBaseUrl": "http://localhost:3000",
+  "robotApiEndpoint": "",
+  "defaultRoomCode": "BTL1",
+  "defaultSessionKey": "mcpserver",
+  "cognitoUserPoolId": "",
+  "cognitoUserPoolClientId": "",
+  "cognitoRegion": ""
+}

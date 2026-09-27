@@ -1,0 +1,9 @@
+boto3>=1.34.0
+mutagen>=1.47.0
+Pillow>=10.0.0
+PyJWT[crypto]>=2.8.0
+requests>=2.31.0
+strands-agents
+markdown
+beautifulsoup4
+langdetect
