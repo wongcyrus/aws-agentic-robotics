@@ -335,7 +335,8 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
     new s3deploy.BucketDeployment(this, "DeployWeb", {
       sources: [
         s3deploy.Source.asset(
-          path.join(__dirname, "../../../domain-expansion-ar-game-v2/dist")
+          path.join(__dirname, "../../../domain-expansion-ar-game-v2/dist"),
+          { exclude: ["static/video/**"] }
         ),
         s3deploy.Source.jsonData("config.json", {
           protocolVersion: "2.0",
