@@ -422,6 +422,28 @@
       border-color: var(--accent-cyan);
     }
 
+    .volume-control {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 8px;
+      color: rgba(240, 244, 248, 0.75);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+    }
+
+    .volume-control input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent-cyan);
+      cursor: pointer;
+    }
+
+    .volume-value {
+      min-width: 36px;
+      color: var(--accent-cyan);
+      text-align: right;
+    }
+
     .btn {
       background: linear-gradient(135deg, var(--accent-cyan), #00a8ff);
       color: #05070c;
@@ -837,6 +859,11 @@
     <div id="panel-manual-test" class="test-trigger">
       <div style="font-size: 12px; font-weight: 600; color: var(--accent-cyan); margin-bottom: 4px; text-transform: uppercase; font-family: 'Share Tech Mono';">🎙️ Manual Override Test</div>
       <input type="text" id="manual-text" class="test-input" placeholder="Type message..." value="Hello, I am Shizuku. Ready to assist.">
+      <label class="volume-control" for="voice-volume">
+        <span>Volume</span>
+        <input type="range" id="voice-volume" min="0" max="100" step="1" value="100" oninput="setVoiceVolume(this.value)">
+        <span id="voice-volume-value" class="volume-value">100%</span>
+      </label>
       <button class="btn" onclick="testManualSpeech()">Speak Now</button>
     </div>
 
@@ -1058,7 +1085,41 @@
       }
     }
 
+    const VOICE_VOLUME_STORAGE_KEY = 'digitalHumanVoiceVolume';
     let currentAudio = null;
+    let voiceVolume = loadVoiceVolume();
+
+    function loadVoiceVolume() {
+      try {
+        const storedVolume = Number.parseFloat(localStorage.getItem(VOICE_VOLUME_STORAGE_KEY));
+        if (Number.isFinite(storedVolume)) {
+          return Math.min(Math.max(storedVolume, 0), 1);
+        }
+      } catch (error) {
+        console.warn("Unable to load saved voice volume:", error);
+      }
+      return 1;
+    }
+
+    function setVoiceVolume(percent) {
+      const normalizedVolume = Math.min(Math.max(Number(percent) / 100, 0), 1);
+      voiceVolume = Number.isFinite(normalizedVolume) ? normalizedVolume : 1;
+
+      const slider = document.getElementById('voice-volume');
+      const valueLabel = document.getElementById('voice-volume-value');
+      const displayPercent = Math.round(voiceVolume * 100);
+      if (slider) slider.value = String(displayPercent);
+      if (valueLabel) valueLabel.textContent = `${displayPercent}%`;
+      if (currentAudio) currentAudio.volume = voiceVolume;
+
+      try {
+        localStorage.setItem(VOICE_VOLUME_STORAGE_KEY, String(voiceVolume));
+      } catch (error) {
+        console.warn("Unable to save voice volume:", error);
+      }
+    }
+
+    setVoiceVolume(voiceVolume * 100);
 
     function stopAllSpeech() {
       // Cancel Web Speech API
@@ -1134,6 +1195,7 @@
 
       utterance.rate = 1.05;
       utterance.pitch = 1.1;
+      utterance.volume = voiceVolume;
 
       utterance.onstart = () => {
         setSpeakingState(true);
@@ -1164,6 +1226,7 @@
       console.log("🔊 Playing Polly Audio:", url);
       currentAudio = new Audio(url);
       currentAudio.crossOrigin = 'anonymous';
+      currentAudio.volume = voiceVolume;
       
       currentAudio.onplay = () => {
         setSpeakingState(true);
