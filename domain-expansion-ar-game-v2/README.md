@@ -45,8 +45,25 @@ The development server automatically reuses `cert.pem` and `key.pem` from the
 V1 project when they are available. The local WebSocket URL follows the page
 protocol, so HTTPS uses `wss://localhost:5173/control`. It also provides
 same-origin local snapshot upload/download endpoints so the embedded Scroll of
-Honor can display both player captures without a separate REST server. To use
-different certificates:
+Honor can display both player captures without a separate REST server.
+
+Local AI commentary uses Amazon Bedrock through the AWS SDK credential chain.
+Sign in with the AWS CLI before starting the server. The defaults match the
+deployed commentator, and can be overridden when needed:
+
+```bash
+aws sso login --profile your-profile
+AWS_PROFILE=your-profile \
+BEDROCK_REGION=us-east-1 \
+BEDROCK_MODEL_ID=global.moonshotai.kimi-k3 \
+npm run dev
+```
+
+The AWS credentials remain in the Node development server and are never sent
+to the browser. Local commentary uses browser speech synthesis even when the
+UI requests AWS TTS because local mode does not upload Polly audio to S3.
+
+To use different certificates:
 
 ```bash
 VITE_HTTPS_CERT=/absolute/path/to/cert.pem \

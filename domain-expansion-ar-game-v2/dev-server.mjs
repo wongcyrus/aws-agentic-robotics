@@ -2,10 +2,19 @@ import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer } from 'ws';
 
 const port = Number(process.env.PORT || 5173);
+const e2eTestMode = process.env.E2E_TEST_MODE === '1';
+const bedrockRegion = process.env.BEDROCK_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+const bedrockModelId = process.env.BEDROCK_MODEL_ID || 'global.moonshotai.kimi-k3';
+const bedrock = new BedrockRuntimeClient({
+  region: bedrockRegion,
+  maxAttempts: 5,
+  retryMode: 'adaptive'
+});
 const explicitCert = process.env.VITE_HTTPS_CERT;
 const explicitKey = process.env.VITE_HTTPS_KEY;
 if (Boolean(explicitCert) !== Boolean(explicitKey)) {
@@ -57,6 +66,54 @@ const readJson = (request) => new Promise((resolveBody, reject) => {
   });
   request.on('error', reject);
 });
+const score = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const buildCommentaryPrompt = (body, path) => {
+  const language = typeof body.lang === 'string' ? body.lang : 'en';
+  const languageRule = {
+    'zh-HK': 'Respond in energetic Hong Kong Cantonese using Traditional Chinese, with occasional English or Japanese JJK terms.',
+    'zh-TW': 'Respond in energetic Taiwan Traditional Chinese. Do not use Simplified Chinese.',
+    ja: 'Respond in natural, energetic Japanese with standard JJK terms.',
+    en: 'Respond in natural, energetic English.'
+  }[language] || 'Respond in natural, energetic English.';
+  const cleanLanguageRule = body.foulLanguage
+    ? 'Sharp competitive trash-talk is allowed, but do not target protected characteristics.'
+    : 'Keep all language clean, family-friendly, and free of profanity or abusive insults.';
+  const eventText = typeof body.text === 'string'
+    ? body.text
+    : typeof body.detail === 'string'
+      ? body.detail
+      : typeof body.eventType === 'string'
+        ? body.eventType
+        : '';
+  let event;
+  if (path === '/api/battle-result') {
+    event = `Conclude the battle. Player 1 scored ${score(body.p1Score)} and Player 2 scored ${score(body.p2Score)}. Latest event: ${eventText || 'battle completed'}. Clearly announce the winner or draw.`;
+  } else if (body.isReset || body.eventType === 'RESET') {
+    event = `Introduce the competitors starting a duel in room ${String(body.roomCode || 'BTL1').slice(0, 24)}. Build excitement before the countdown.`;
+  } else {
+    event = `React to this live battle event: ${eventText || 'the battle continues'}. Current score is Player 1 ${score(body.p1Score)}, Player 2 ${score(body.p2Score)}.`;
+  }
+  return `${event}\n${languageRule}\n${cleanLanguageRule}\nOutput only Kugisaki Nobara's direct, high-energy commentary in no more than two short sentences.`;
+};
+const generateCommentary = async (body, path) => {
+  const result = await bedrock.send(new ConverseCommand({
+    modelId: bedrockModelId,
+    system: [{
+      text: 'You are Kugisaki Nobara acting as a confident, fashionable Jujutsu Kaisen battle commentator. Be punchy, dramatic, and specific to the supplied event. Never include analysis, labels, or preamble.'
+    }],
+    messages: [{ role: 'user', content: [{ text: buildCommentaryPrompt(body, path) }] }],
+    inferenceConfig: { maxTokens: 400 }
+  }));
+  const commentary = result.output?.message?.content
+    ?.find((block) => typeof block.text === 'string')
+    ?.text?.trim();
+  if (!commentary) throw new Error('Bedrock response did not contain commentary text');
+  return {
+    commentary,
+    ttsMode: 'browser',
+    requestedTtsMode: body.ttsMode === 'aws' ? 'aws' : 'browser'
+  };
+};
 const handleApi = async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   if (!url.pathname.startsWith('/api/')) return false;
@@ -91,8 +148,21 @@ const handleApi = async (request, response) => {
       return true;
     }
     if (request.method === 'POST' && ['/api/live-status', '/api/battle-result'].includes(url.pathname)) {
-      await readJson(request);
-      json(response, 200, { commentary: 'Commentary is ready.' });
+      const body = await readJson(request);
+      if (e2eTestMode) {
+        json(response, 200, { commentary: 'Commentary is ready.', ttsMode: 'browser' });
+        return true;
+      }
+      try {
+        json(response, 200, await generateCommentary(body, url.pathname));
+      } catch (error) {
+        console.error('Local Bedrock commentary failed', error);
+        const errorName = error instanceof Error && error.name ? error.name : 'BedrockError';
+        json(response, 502, {
+          success: false,
+          message: `Local AI commentary failed (${errorName}). Check AWS credentials, Bedrock model access, BEDROCK_REGION, and BEDROCK_MODEL_ID.`
+        });
+      }
       return true;
     }
     if (url.pathname === '/api/enhance-portrait' || url.pathname === '/api/check-enhancement') {
@@ -120,7 +190,6 @@ const techniques = [
   'Idle Death Gamble', 'Yuji Itadori', 'Chimera Shadow Garden', 'Time Cell Moon Palace',
   'Lapse Blue', 'Reversal Red', 'Hollow Purple'
 ];
-const e2eTestMode = process.env.E2E_TEST_MODE === '1';
 let e2eShuffleIndex = 0;
 const id = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const emptyPlayer = () => ({ connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null });
