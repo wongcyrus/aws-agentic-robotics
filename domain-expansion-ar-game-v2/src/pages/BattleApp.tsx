@@ -13,7 +13,6 @@ import { useGameSession } from '../services/useGameSession';
 import { WebRtcSessionService } from '../services/webrtcSession';
 import { ShareApp } from './ShareApp';
 
-const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const winVideos = import.meta.env.DEV
   ? ['onepunch.mp4']
   : ['heroacademy.mp4', 'solo-leveling.mp4', 'onepunchman.mp4', '8-gate.mp4', 'escanor.mp4', 'onepunch.mp4', 'onepunch2.mp4', 'demon-slayer-s2.mp4', 'demon-slayer-s1.mp4'];
@@ -164,7 +163,6 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     void (async () => {
       try {
         await api.registerRoom(matchId, settings.roomCode, config?.webSocketUrl ?? '');
-        if (state.config.captureSnapshots) await delay(1200);
         await requestCommentary('/api/live-status', { eventType: 'RESET', isReset: true });
         await commentaryPlayer.current.waitForPlayback();
       } catch (error) {
@@ -310,12 +308,18 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
       <Live2DCommentator audioElement={live2dAudio} speaking={live2dSpeaking} size={settings.avatarSize} />}
     <section className="commentary" style={{ '--avatar-size': `${settings.avatarSize}px` } as React.CSSProperties}>
       <img src="/static/img/commentator_avatar.png" alt={text.aiCommentator} />
-      <div><p>{settings.commentatorEnabled ? commentary : text.commentatorDisabled}</p>{commentaryError && <small>{commentaryError}</small>}</div>
+      <div><p>{settings.commentatorEnabled
+        ? state?.phase === 'preparing' ? text.preparingCommentary : commentary
+        : text.commentatorDisabled}</p>{commentaryError && <small>{commentaryError}</small>}</div>
     </section>
     <button className="panel-toggle battle-panel-toggle" onClick={() => setShowSettings((visible) => !visible)}>
       {showSettings ? text.hideSettings : text.matchSettings}
     </button>
     <button className="primary battle-start" onClick={start}>{matchActive ? text.stopReset : text.startBattle}</button>
+    {state?.phase === 'preparing' && <section className="preparing-overlay" role="status" aria-live="polite">
+      <div className="loading-spinner" />
+      <strong>{text.preparingCommentary}</strong>
+    </section>}
     {showSettings && <aside className="battle-controls">
       <button className="panel-close" aria-label={text.hideSettings} onClick={() => setShowSettings(false)}>×</button>
       <label>{text.room}<input value={settings.roomCode} onChange={(event) => setSettings({ ...settings, roomCode: event.target.value.toUpperCase() })} /></label>

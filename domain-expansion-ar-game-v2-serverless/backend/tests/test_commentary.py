@@ -70,19 +70,14 @@ def test_direct_bedrock_fallback_builds_multimodal_request(monkeypatch):
     assert result == "generated"
 
 
-def test_direct_bedrock_fallback_retries_truncated_output(monkeypatch):
+def test_direct_bedrock_fallback_rejects_truncated_output(monkeypatch):
     calls = []
 
     def converse(**kwargs):
         calls.append(kwargs["inferenceConfig"]["maxTokens"])
-        if len(calls) == 1:
-            return {
-                "stopReason": "max_tokens",
-                "output": {"message": {"content": [{"text": "truncated P2"}]}},
-            }
         return {
-            "stopReason": "end_turn",
-            "output": {"message": {"content": [{"text": "complete commentary"}]}},
+            "stopReason": "max_tokens",
+            "output": {"message": {"content": [{"text": "truncated P2"}]}},
         }
 
     monkeypatch.setattr(
@@ -91,15 +86,26 @@ def test_direct_bedrock_fallback_retries_truncated_output(monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(converse=converse),
     )
 
-    assert commentary.direct_bedrock_fallback("prompt") == "complete commentary"
-    assert calls == [400, 800]
+    with pytest.raises(RuntimeError, match="Direct Bedrock commentary failed"):
+        commentary.direct_bedrock_fallback("prompt")
+    assert calls == [commentary.COMMENTARY_MAX_TOKENS]
 
 
-def test_direct_bedrock_fallback_returns_stable_message_on_failure(monkeypatch):
+def test_direct_bedrock_fallback_surfaces_failure(monkeypatch):
     monkeypatch.setattr(
         commentary.boto3, "client", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
     )
-    assert "Cursed Energy connection unstable" in commentary.direct_bedrock_fallback("prompt")
+    with pytest.raises(RuntimeError, match="Direct Bedrock commentary failed"):
+        commentary.direct_bedrock_fallback("prompt")
+
+
+def test_local_direct_bypasses_agent_runtimes(monkeypatch):
+    monkeypatch.setattr(
+        commentary,
+        "direct_bedrock_fallback",
+        lambda *args, **kwargs: "direct commentary",
+    )
+    assert commentary.generate_ai_commentary("local_direct", "fight") == "direct commentary"
 
 
 def test_resolve_agentcore_identity_is_stable(monkeypatch):

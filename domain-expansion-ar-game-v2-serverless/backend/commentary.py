@@ -12,8 +12,14 @@ DEFAULT_AGENT_TYPE = os.environ.get("AGENT_TYPE", "agentcore_runtime")
 OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
 OPENCLAW_AGENT_ID = os.environ.get("OPENCLAW_AGENT_ID", "domain-commentator")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
+COMMENTARY_MAX_TOKENS = int(
+    os.environ.get(
+        "COMMENTARY_MAX_TOKENS",
+        "1600" if "kimi" in BEDROCK_MODEL_ID.lower() else "400",
+    )
+)
 AGENTCORE_RUNTIME_ARN = os.environ.get("AGENTCORE_RUNTIME_ARN", "")
 OPENCLAW_RUNTIME_ARN = os.environ.get("OPENCLAW_RUNTIME_ARN", "")
 
@@ -245,18 +251,16 @@ def direct_bedrock_fallback(
 
         messages = [{"role": "user", "content": content_list}]
 
-        def invoke(max_tokens):
-            return bedrock_client.converse(
-                modelId=BEDROCK_MODEL_ID,
-                messages=messages,
-                system=[{"text": system_prompt}],
-                inferenceConfig={"maxTokens": max_tokens},
-            )
-
-        response = invoke(400)
+        response = bedrock_client.converse(
+            modelId=BEDROCK_MODEL_ID,
+            messages=messages,
+            system=[{"text": system_prompt}],
+            inferenceConfig={"maxTokens": COMMENTARY_MAX_TOKENS},
+        )
         if response.get("stopReason") == "max_tokens":
-            logger.warning("Bedrock commentary reached 400 output tokens; retrying with 800.")
-            response = invoke(800)
+            raise RuntimeError(
+                f"Bedrock commentary reached {COMMENTARY_MAX_TOKENS} output tokens"
+            )
 
         content = response["output"]["message"]["content"]
         commentary = next(
@@ -269,7 +273,7 @@ def direct_bedrock_fallback(
         return commentary
     except Exception as e:
         logger.error(f"Ultimate direct Bedrock fallback failed: {e}")
-        return "領域干擾！Cursed Energy connection unstable. Give me a moment to gather my nails!"
+        raise RuntimeError("Direct Bedrock commentary failed") from e
 
 
 def resolve_agentcore_identity(session_id: str, runtime_arn: str) -> tuple[str, str, str]:
@@ -312,6 +316,16 @@ def generate_ai_commentary(
         image_format_p1 = "jpeg"
     if image_format_p2 == "jpg":
         image_format_p2 = "jpeg"
+
+    if agent_engine == "local_direct":
+        return direct_bedrock_fallback(
+            content_block,
+            image_bytes_p1,
+            image_format_p1,
+            image_bytes_p2,
+            image_format_p2,
+            language=language,
+        )
 
     # Build base64 if missing but bytes are present
     if not image_base64_p1 and image_bytes_p1:

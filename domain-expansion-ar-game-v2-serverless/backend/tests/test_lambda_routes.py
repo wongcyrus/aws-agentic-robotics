@@ -187,6 +187,39 @@ def test_live_status_generates_commentary_audio_and_gateway_calls(monkeypatch):
     assert gateway_calls[0]["arguments"]["message"] == "Great fight!"
 
 
+def test_local_tts_reuses_supplied_commentary_without_model_call(monkeypatch):
+    monkeypatch.setattr(
+        commentary,
+        "generate_ai_commentary",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("model should not run")),
+    )
+    monkeypatch.setattr(
+        commentary_tts,
+        "synthesize_commentary_audio",
+        lambda **kwargs: {"audioUrl": "https://audio", "duration": 1.0},
+    )
+    response = lambda_function.handle_http(
+        {
+            "path": "/api/live-status",
+            "httpMethod": "POST",
+            "body": json.dumps(
+                {
+                    "sessionId": "s",
+                    "agent_type": "local_tts",
+                    "commentaryText": "Already generated.",
+                    "agentImagePolicy": "never",
+                    "ttsMode": "aws",
+                    "lang": "en",
+                }
+            ),
+        }
+    )
+    body = _body(response)
+    assert body["commentary"] == "Already generated."
+    assert body["ttsMode"] == "aws"
+    assert body["audioUrl"] == "https://audio"
+
+
 def test_battle_result_marks_reset_and_falls_back_to_browser_tts(monkeypatch):
     monkeypatch.setattr(commentary, "translate_detail", lambda text: text)
     monkeypatch.setattr(commentary, "generate_ai_commentary", lambda **kwargs: "Winner!")

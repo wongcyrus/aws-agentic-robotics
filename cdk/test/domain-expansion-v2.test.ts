@@ -122,6 +122,7 @@ describe("DomainExpansionV2ServerlessConstruct", () => {
     );
     expect(pythonFunctionProps[0].environment).toEqual(
       expect.objectContaining({
+        BEDROCK_MODEL_ID: "global.amazon.nova-2-lite-v1:0",
         COGNITO_USER_POOL_ID: "us-east-1_example",
         ROBOT_API_ENDPOINT: "https://robot.example.test",
       })

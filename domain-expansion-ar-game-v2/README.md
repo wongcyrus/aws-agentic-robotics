@@ -61,7 +61,8 @@ deployed commentator, and can be overridden when needed:
 aws sso login --profile your-profile
 AWS_PROFILE=your-profile \
 BEDROCK_REGION=us-east-1 \
-BEDROCK_MODEL_ID=global.moonshotai.kimi-k3 \
+BEDROCK_MODEL_ID=global.amazon.nova-2-lite-v1:0 \
+COMMENTARY_MAX_TOKENS=400 \
 POLLY_REGION=us-east-1 \
 LOCAL_COMMENTARY_LAMBDA=optional-deployed-function-name \
 npm run dev

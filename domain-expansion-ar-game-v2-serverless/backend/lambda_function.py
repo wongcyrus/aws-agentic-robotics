@@ -587,18 +587,25 @@ def handle_http(event):
         agent_engine = live_request.agent_engine
         logger.info(f"Invoking Commentary Engine: {agent_engine}")
 
-        commentary_text = generate_ai_commentary(
-            agent_engine=agent_engine,
-            content_block=content_block,
-            session_id=session_id,
-            image_bytes_p1=image_bytes_p1,
-            image_format_p1=image_format_p1,
-            image_bytes_p2=image_bytes_p2,
-            image_format_p2=image_format_p2,
-            image_base64_p1=image_base64_p1,
-            image_base64_p2=image_base64_p2,
-            language=commentary_language
-        )
+        if agent_engine == "local_tts":
+            commentary_text = str(body.get("commentaryText") or "").strip()
+            if not commentary_text:
+                raise ValueError("commentaryText is required for local_tts")
+            if len(commentary_text) > 1500:
+                raise ValueError("commentaryText exceeds 1500 characters")
+        else:
+            commentary_text = generate_ai_commentary(
+                agent_engine=agent_engine,
+                content_block=content_block,
+                session_id=session_id,
+                image_bytes_p1=image_bytes_p1,
+                image_format_p1=image_format_p1,
+                image_bytes_p2=image_bytes_p2,
+                image_format_p2=image_format_p2,
+                image_base64_p1=image_base64_p1,
+                image_base64_p2=image_base64_p2,
+                language=commentary_language
+            )
 
         # ALWAYS call digital human (xiaoice) speak for strand local, agentcore, and openclaw responses
         if commentary_text and agent_engine in ("strands_local", "agentcore_runtime", "openclaw"):

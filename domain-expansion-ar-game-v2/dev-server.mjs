@@ -11,7 +11,8 @@ import { WebSocketServer } from 'ws';
 const port = Number(process.env.PORT || 5173);
 const e2eTestMode = process.env.E2E_TEST_MODE === '1';
 const bedrockRegion = process.env.BEDROCK_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
-const bedrockModelId = process.env.BEDROCK_MODEL_ID || 'global.moonshotai.kimi-k3';
+const bedrockModelId = process.env.BEDROCK_MODEL_ID || 'global.amazon.nova-2-lite-v1:0';
+const commentaryMaxTokens = Number(process.env.COMMENTARY_MAX_TOKENS || (bedrockModelId.includes('kimi') ? 1600 : 400));
 const pollyRegion = process.env.POLLY_REGION || bedrockRegion;
 const bedrock = new BedrockRuntimeClient({
   region: bedrockRegion,
@@ -20,7 +21,7 @@ const bedrock = new BedrockRuntimeClient({
 });
 const polly = new PollyClient({
   region: pollyRegion,
-  maxAttempts: 3,
+  maxAttempts: 1,
   retryMode: 'adaptive'
 });
 const lambda = new LambdaClient({
@@ -29,6 +30,7 @@ const lambda = new LambdaClient({
   retryMode: 'adaptive'
 });
 let commentaryLambdaName = process.env.LOCAL_COMMENTARY_LAMBDA || '';
+let directPollyUnavailableUntil = 0;
 const explicitCert = process.env.VITE_HTTPS_CERT;
 const explicitKey = process.env.VITE_HTTPS_KEY;
 if (Boolean(explicitCert) !== Boolean(explicitKey)) {
@@ -135,6 +137,9 @@ const plainSpeechText = (text) => text
   .replace(/\s+/g, ' ')
   .trim();
 const synthesizePollyAudio = async (text, language) => {
+  if (Date.now() < directPollyUnavailableUntil) {
+    throw new Error('Direct Polly is temporarily unavailable');
+  }
   const voice = pollyVoice(language);
   const synthesize = (engine) => polly.send(new SynthesizeSpeechCommand({
     Text: plainSpeechText(text),
@@ -147,12 +152,23 @@ const synthesizePollyAudio = async (text, language) => {
   try {
     result = await synthesize(voice.engine);
   } catch (error) {
-    if (voice.engine === 'standard') throw error;
+    if (voice.engine === 'standard') {
+      directPollyUnavailableUntil = Date.now() + 5 * 60_000;
+      throw error;
+    }
     console.warn(`Polly neural synthesis failed for ${voice.voiceId}; retrying standard`, error);
-    result = await synthesize('standard');
+    try {
+      result = await synthesize('standard');
+    } catch (standardError) {
+      directPollyUnavailableUntil = Date.now() + 5 * 60_000;
+      throw standardError;
+    }
   }
   const bytes = await result.AudioStream?.transformToByteArray();
-  if (!bytes?.length) throw new Error('Polly returned an empty audio stream');
+  if (!bytes?.length) {
+    directPollyUnavailableUntil = Date.now() + 5 * 60_000;
+    throw new Error('Polly returned an empty audio stream');
+  }
   return {
     audioUrl: `data:audio/mpeg;base64,${Buffer.from(bytes).toString('base64')}`,
     voiceId: voice.voiceId,
@@ -215,6 +231,20 @@ const invokeDeployedCommentary = async (body, path) => {
   }
   return responseBody;
 };
+const invokeDeployedTts = async (body, commentary) => {
+  const functionName = await resolveCommentaryLambda();
+  const responseBody = await invokeLambdaHttp(functionName, '/api/live-status', {
+    ...body,
+    agent_type: 'local_tts',
+    agentImagePolicy: 'never',
+    commentaryText: commentary,
+    ttsMode: 'aws'
+  });
+  if (responseBody.ttsMode !== 'aws' || !responseBody.audioUrl) {
+    throw new Error('Deployed commentary Lambda did not return Polly audio');
+  }
+  return responseBody;
+};
 const buildCommentaryPrompt = (body, path) => {
   const language = typeof body.lang === 'string' ? body.lang : 'en';
   const languageRule = {
@@ -250,19 +280,15 @@ const generateCommentary = async (body, path) => {
     { image: { format, source: { bytes } } }
   ]);
   content.push({ text: buildCommentaryPrompt(body, path) });
-  const invoke = (maxTokens) => bedrock.send(new ConverseCommand({
+  const result = await bedrock.send(new ConverseCommand({
     modelId: bedrockModelId,
     system: [{
       text: 'You are Kugisaki Nobara acting as a confident, fashionable Jujutsu Kaisen battle commentator. Be punchy, dramatic, and specific to the supplied event. Never include analysis, labels, or preamble.'
     }],
     messages: [{ role: 'user', content }],
-    inferenceConfig: { maxTokens }
+    inferenceConfig: { maxTokens: commentaryMaxTokens }
   }));
-  let result = await invoke(400);
-  if (result.stopReason === 'max_tokens') {
-    console.warn('Bedrock commentary reached 400 output tokens; retrying with 800.');
-    result = await invoke(800);
-  }
+  if (result.stopReason === 'max_tokens') throw new Error(`Bedrock commentary reached ${commentaryMaxTokens} output tokens`);
   const commentary = result.output?.message?.content
     ?.find((block) => typeof block.text === 'string')
     ?.text?.trim();
@@ -284,7 +310,7 @@ const generateCommentary = async (body, path) => {
   } catch (directError) {
     console.warn('Direct local Polly synthesis failed; trying deployed Lambda', directError);
     try {
-      return await invokeDeployedCommentary(body, path);
+      return await invokeDeployedTts(body, commentary);
     } catch (lambdaError) {
       console.error('Deployed Polly fallback failed', lambdaError);
       const directName = directError instanceof Error && directError.name ? directError.name : 'PollyError';

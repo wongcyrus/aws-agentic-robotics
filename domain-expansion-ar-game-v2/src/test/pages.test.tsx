@@ -313,6 +313,7 @@ describe('BattleApp', () => {
     });
     const { BattleApp } = await import('../pages/BattleApp');
     render(<BattleApp initialSettings={{ language: 'en' }} />);
+    expect(screen.getByRole('status').textContent).toContain('NOW LOADING OPENING COMMENTARY');
     await waitFor(() => expect(openingUtterance).toBeDefined());
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(command).not.toHaveBeenCalledWith('match.beginCountdown');
