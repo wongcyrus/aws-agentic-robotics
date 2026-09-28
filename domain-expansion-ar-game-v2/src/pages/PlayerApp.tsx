@@ -336,7 +336,6 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       <img src="/static/img/jujutsu-kaisen-logo.png" alt="Jujutsu Kaisen" />
       <span className="role-pill">{settings.playerMode === 'solo' ? text.solo : `${text.playerLabel(settings.role === 'player1' ? 1 : 2)} · ${settings.roomCode}`}</span>
       <h1>領域展開 AR</h1>
-      <p>{settings.playerMode === 'solo' ? text.localSoloRound : connectionStatus} · {cameraStatus}</p>
     </header>
     <section className="hud">
       <small>{text.target}</small><strong style={{ color: getGesture(target)?.color }}>{targetLabel}</strong>
@@ -355,6 +354,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     </button>
     {showSettings && <aside className="settings-card">
       <button className="panel-close" aria-label={text.hideSettings} onClick={() => setShowSettings(false)}>×</button>
+      <p className="status-message">{settings.playerMode === 'solo' ? text.localSoloRound : connectionStatus} · {cameraStatus}</p>
       <label>{text.mode}<select value={settings.playerMode} onChange={(event) => setSettings({ ...settings, playerMode: event.target.value as typeof settings.playerMode })}><option value="battle">{text.onlineBattle}</option><option value="solo">{text.soloGame}</option></select></label>
       {settings.playerMode === 'solo'
         ? <div className="button-row"><button className="primary" onClick={startSolo}>{text.startRound}</button><button onClick={stopSolo}>{text.quit}</button></div>

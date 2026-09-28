@@ -56,12 +56,21 @@ aws sso login --profile your-profile
 AWS_PROFILE=your-profile \
 BEDROCK_REGION=us-east-1 \
 BEDROCK_MODEL_ID=global.moonshotai.kimi-k3 \
+POLLY_REGION=us-east-1 \
+LOCAL_COMMENTARY_LAMBDA=optional-deployed-function-name \
 npm run dev
 ```
 
 The AWS credentials remain in the Node development server and are never sent
-to the browser. Local commentary uses browser speech synthesis even when the
-UI requests AWS TTS because local mode does not upload Polly audio to S3.
+to the browser. When AWS TTS is selected, local mode synthesizes Amazon Polly
+MP3 audio in memory and returns it directly to the browser; it does not require
+an S3 bucket. If direct access to the Polly endpoint is unavailable, local mode
+automatically invokes the deployed Domain Expansion V2 backend Lambda and uses
+its presigned Polly audio. `LOCAL_COMMENTARY_LAMBDA` avoids automatic Lambda
+discovery when supplied. The AWS identity therefore needs
+`bedrock:InvokeModel`, `polly:SynthesizeSpeech`, and, for the fallback,
+`lambda:ListFunctions` plus `lambda:InvokeFunction`. If both Polly paths fail,
+the UI displays the error and falls back to browser speech.
 
 To use different certificates:
 

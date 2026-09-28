@@ -3,6 +3,8 @@ import { createServer as createHttpsServer } from 'node:https';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
+import { InvokeCommand, LambdaClient, ListFunctionsCommand } from '@aws-sdk/client-lambda';
+import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer } from 'ws';
 
@@ -10,11 +12,23 @@ const port = Number(process.env.PORT || 5173);
 const e2eTestMode = process.env.E2E_TEST_MODE === '1';
 const bedrockRegion = process.env.BEDROCK_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
 const bedrockModelId = process.env.BEDROCK_MODEL_ID || 'global.moonshotai.kimi-k3';
+const pollyRegion = process.env.POLLY_REGION || bedrockRegion;
 const bedrock = new BedrockRuntimeClient({
   region: bedrockRegion,
   maxAttempts: 5,
   retryMode: 'adaptive'
 });
+const polly = new PollyClient({
+  region: pollyRegion,
+  maxAttempts: 3,
+  retryMode: 'adaptive'
+});
+const lambda = new LambdaClient({
+  region: bedrockRegion,
+  maxAttempts: 3,
+  retryMode: 'adaptive'
+});
+let commentaryLambdaName = process.env.LOCAL_COMMENTARY_LAMBDA || '';
 const explicitCert = process.env.VITE_HTTPS_CERT;
 const explicitKey = process.env.VITE_HTTPS_KEY;
 if (Boolean(explicitCert) !== Boolean(explicitKey)) {
@@ -67,6 +81,90 @@ const readJson = (request) => new Promise((resolveBody, reject) => {
   request.on('error', reject);
 });
 const score = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const pollyVoices = {
+  'zh-HK': { voiceId: 'Hiujin', engine: 'neural', languageCode: 'yue-CN' },
+  'zh-TW': { voiceId: 'Zhiyu', engine: 'neural', languageCode: 'cmn-CN' },
+  en: { voiceId: 'Joanna', engine: 'neural', languageCode: 'en-US' },
+  ja: { voiceId: 'Mizuki', engine: 'standard', languageCode: 'ja-JP' }
+};
+const pollyVoice = (language) => {
+  if (language === 'zh-HK' || language === 'zh-TW' || language === 'ja') return pollyVoices[language];
+  return pollyVoices.en;
+};
+const plainSpeechText = (text) => text
+  .replace(/<[^>]*>/g, ' ')
+  .replace(/[*_`#>~]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+const synthesizePollyAudio = async (text, language) => {
+  const voice = pollyVoice(language);
+  const synthesize = (engine) => polly.send(new SynthesizeSpeechCommand({
+    Text: plainSpeechText(text),
+    OutputFormat: 'mp3',
+    VoiceId: voice.voiceId,
+    Engine: engine,
+    LanguageCode: voice.languageCode
+  }));
+  let result;
+  try {
+    result = await synthesize(voice.engine);
+  } catch (error) {
+    if (voice.engine === 'standard') throw error;
+    console.warn(`Polly neural synthesis failed for ${voice.voiceId}; retrying standard`, error);
+    result = await synthesize('standard');
+  }
+  const bytes = await result.AudioStream?.transformToByteArray();
+  if (!bytes?.length) throw new Error('Polly returned an empty audio stream');
+  return {
+    audioUrl: `data:audio/mpeg;base64,${Buffer.from(bytes).toString('base64')}`,
+    voiceId: voice.voiceId,
+    ttsMode: 'aws'
+  };
+};
+const resolveCommentaryLambda = async () => {
+  if (commentaryLambdaName) return commentaryLambdaName;
+  let marker;
+  do {
+    const page = await lambda.send(new ListFunctionsCommand({ Marker: marker, MaxItems: 50 }));
+    const match = page.Functions?.find(({ FunctionName }) =>
+      FunctionName?.includes('DomainExpansionV2BackendFuncti')
+    );
+    if (match?.FunctionName) {
+      commentaryLambdaName = match.FunctionName;
+      return commentaryLambdaName;
+    }
+    marker = page.NextMarker;
+  } while (marker);
+  throw new Error('Unable to find the deployed Domain Expansion V2 backend Lambda');
+};
+const invokeDeployedCommentary = async (body, path) => {
+  const functionName = await resolveCommentaryLambda();
+  const event = {
+    path,
+    httpMethod: 'POST',
+    body: JSON.stringify({
+      ...body,
+      agent_type: 'local_direct',
+      agentImagePolicy: 'never',
+      ttsMode: 'aws'
+    })
+  };
+  const result = await lambda.send(new InvokeCommand({
+    FunctionName: functionName,
+    InvocationType: 'RequestResponse',
+    Payload: Buffer.from(JSON.stringify(event))
+  }));
+  if (result.FunctionError) throw new Error(`Deployed commentary Lambda failed: ${result.FunctionError}`);
+  const lambdaResponse = JSON.parse(Buffer.from(result.Payload ?? []).toString('utf8'));
+  const responseBody = JSON.parse(lambdaResponse.body || '{}');
+  if (lambdaResponse.statusCode < 200 || lambdaResponse.statusCode >= 300) {
+    throw new Error(responseBody.message || responseBody.error || `Lambda returned ${lambdaResponse.statusCode}`);
+  }
+  if (responseBody.ttsMode !== 'aws' || !responseBody.audioUrl) {
+    throw new Error('Deployed commentary Lambda did not return Polly audio');
+  }
+  return responseBody;
+};
 const buildCommentaryPrompt = (body, path) => {
   const language = typeof body.lang === 'string' ? body.lang : 'en';
   const languageRule = {
@@ -108,11 +206,28 @@ const generateCommentary = async (body, path) => {
     ?.find((block) => typeof block.text === 'string')
     ?.text?.trim();
   if (!commentary) throw new Error('Bedrock response did not contain commentary text');
-  return {
+  const response = {
     commentary,
     ttsMode: 'browser',
     requestedTtsMode: body.ttsMode === 'aws' ? 'aws' : 'browser'
   };
+  if (body.ttsMode !== 'aws') return response;
+  try {
+    return { ...response, ...await synthesizePollyAudio(commentary, body.lang) };
+  } catch (directError) {
+    console.warn('Direct local Polly synthesis failed; trying deployed Lambda', directError);
+    try {
+      return await invokeDeployedCommentary(body, path);
+    } catch (lambdaError) {
+      console.error('Deployed Polly fallback failed', lambdaError);
+      const directName = directError instanceof Error && directError.name ? directError.name : 'PollyError';
+      const lambdaName = lambdaError instanceof Error && lambdaError.name ? lambdaError.name : 'LambdaError';
+      return {
+        ...response,
+        ttsError: `Amazon Polly failed locally (${directName}) and through Lambda (${lambdaName}); using browser speech.`
+      };
+    }
+  }
 };
 const handleApi = async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);

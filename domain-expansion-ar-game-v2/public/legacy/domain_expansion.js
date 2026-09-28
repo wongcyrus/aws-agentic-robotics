@@ -76,7 +76,6 @@ class DomainExpansionGame {
 
         // VFX State
         this.stars = [];
-        this.symbols = [];
         this.slashes = [];
         this.flashCounter = 0;
         this.mahitoPhase = 0;
@@ -295,8 +294,6 @@ class DomainExpansionGame {
     initStars(w, h, count = 150) {
         this.stars = [];
         for (let i = 0; i < count; i++) this.stars.push({ x: Math.random() * w, y: Math.random() * h, speed: 0.5 + Math.random() * 2.5 });
-        this.symbols = [];
-        for (let i = 0; i < 30; i++) this.symbols.push({ x: Math.random() * w, y: Math.random() * h, speed: 2 + Math.random() * 4, text: Math.floor(Math.random() * 10).toString() });
     }
 
     drawVFX(frameCanvas, stableDomain, hands) {
@@ -388,8 +385,6 @@ class DomainExpansionGame {
 
         ctx.fillStyle = "white";
         this.stars.forEach(s => { s.y = (s.y + s.speed) % h; ctx.beginPath(); ctx.arc(s.x, s.y, 1, 0, Math.PI * 2); ctx.fill(); });
-        ctx.font = "15px monospace";
-        this.symbols.forEach(s => { s.y = (s.y + s.speed) % h; ctx.fillText(s.text, s.x, s.y); });
     }
 
     applyMalevolentShrine(ctx, w, h) {

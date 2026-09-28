@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { detectGesture, StableGestureRecognizer, type Landmark } from '../adapters/gestureRecognizer';
 import { MediaPipeCameraAdapter } from '../adapters/mediaPipeCamera';
 import { CanvasVfxAdapter } from '../adapters/vfx';
@@ -106,5 +108,13 @@ describe('browser adapters', () => {
     expect(context.drawImage).toHaveBeenCalledWith(video, 0, 0, 1024, 768);
     expect(context.arc).toHaveBeenCalled();
     expect(drawVFX).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), 'Hollow Purple', expect.any(Array));
+  });
+
+  it('does not render numeric glyphs in the Unlimited Void effect', () => {
+    const source = readFileSync(resolve('public/legacy/domain_expansion.js'), 'utf8');
+    const effect = source.match(/applyUnlimitedVoid\(ctx, w, h\) \{([\s\S]*?)\n    \}\n\n    applyMalevolentShrine/)?.[1];
+    expect(effect).toBeDefined();
+    expect(effect).not.toContain('fillText');
+    expect(effect).not.toContain('symbols');
   });
 });

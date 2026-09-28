@@ -123,7 +123,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         setCommentary(text);
         commentaryBusyUntil.current = Date.now() + Math.max(4500, text.length * 65);
       }
-      setCommentaryError('');
+      setCommentaryError(response.ttsError ?? '');
       await commentaryPlayer.current.play(response, settings);
     } catch (error) {
       console.warn('Commentary request failed', error);

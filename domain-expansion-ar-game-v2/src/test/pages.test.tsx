@@ -162,6 +162,8 @@ describe('PlayerApp', () => {
     expect(screen.getByText(/Score 1\/3/)).toBeTruthy();
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
     expect(playerReady).toHaveBeenCalled();
+    expect(document.querySelector('.player-header p')).toBeNull();
+    expect(document.querySelector('.settings-card .status-message')?.textContent).toContain('Camera + MediaPipe active');
     fireEvent.click(screen.getByRole('button', { name: 'Stop camera' }));
     expect(cameraStop).toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'abcd' } });
@@ -231,7 +233,7 @@ describe('PlayerApp', () => {
     const { container } = render(<PlayerApp initialSettings={{ language: 'en' }} />);
     fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'solo' } });
     fireEvent.click(screen.getByText('Start round'));
-    expect(container.querySelector('.player-header p')?.textContent).toContain('Local solo round');
+    expect(container.querySelector('.settings-card .status-message')?.textContent).toContain('Local solo round');
     fireEvent.click(screen.getByText('Quit'));
     expect(screen.getByText('ROUND STOPPED')).toBeTruthy();
     fireEvent.click(screen.getByText('Open media popup'));

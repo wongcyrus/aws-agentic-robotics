@@ -8,6 +8,7 @@ export interface CommentaryResponse {
   audioUrl?: string;
   voiceId?: string;
   duration?: number;
+  ttsError?: string;
 }
 
 export class CommentaryPlayer {
