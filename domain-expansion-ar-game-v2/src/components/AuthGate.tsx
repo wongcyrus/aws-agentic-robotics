@@ -25,7 +25,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   if (!config) {
-    return <main className="auth-loading">Loading Domain Expansion V2…</main>;
+    return <main className="auth-loading">Loading Domain Expansion…</main>;
   }
 
   if (!authenticated) {
@@ -50,7 +50,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <main className="auth-page">
       <form className="auth-card" onSubmit={(event) => void submit(event)}>
         <img src="/static/img/jujutsu-kaisen-logo.png" alt="Jujutsu Kaisen" />
-        <h1>Domain Expansion V2</h1>
+        <h1>Domain Expansion</h1>
         <p>Authenticate to enter the online battle.</p>
         <label>Email<input name="username" type="email" autoComplete="username" required /></label>
         <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>

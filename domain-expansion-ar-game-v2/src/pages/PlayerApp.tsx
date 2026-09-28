@@ -294,7 +294,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     <header className="player-header">
       <img src="/static/img/jujutsu-kaisen-logo.png" alt="Jujutsu Kaisen" />
       <span className="role-pill">{settings.playerMode === 'solo' ? text.solo : `${text.playerLabel(settings.role === 'player1' ? 1 : 2)} · ${settings.roomCode}`}</span>
-      <h1>領域展開 AR <b>V2</b></h1>
+      <h1>領域展開 AR</h1>
       <p>{settings.playerMode === 'solo' ? text.localSoloRound : connectionStatus} · {cameraStatus}</p>
     </header>
     <section className="hud">
