@@ -53,7 +53,6 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const currentState = useRef(state);
   const narratedResolutions = useRef(new Set<string>());
   const narratedResults = useRef(new Set<string>());
-  const criticalMarks = useRef(new Set<string>());
   const lastPeriodicCommentary = useRef(0);
   const commentaryInFlight = useRef(false);
   const commentaryBusyUntil = useRef(0);
@@ -206,24 +205,11 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
 
   useEffect(() => {
     if (state?.phase !== 'playing' || !state.matchId) return;
-    const remaining = Math.max(
-      remainingSeconds(state.players.player1.challenge?.deadlineAt, now),
-      remainingSeconds(state.players.player2.challenge?.deadlineAt, now)
-    );
-    const criticalKey = `${state.matchId}:${remaining}`;
-    if ([10, 5, 3].includes(remaining) && !criticalMarks.current.has(criticalKey)) {
-      criticalMarks.current.add(criticalKey);
-      void requestCommentary('/api/live-status', {
-        eventType: 'TIME_CRITICAL',
-        detail: `Only ${remaining} seconds remain for the active techniques.`,
-        timeLeft: remaining
-      });
+    if (now - lastPeriodicCommentary.current >= 35_000) {
       lastPeriodicCommentary.current = now;
-    } else if (now - lastPeriodicCommentary.current >= 35_000) {
-      lastPeriodicCommentary.current = now;
-      void requestCommentary('/api/live-status', { eventType: 'PERIODIC', timeLeft: remaining });
+      void requestCommentary('/api/live-status', { eventType: 'PERIODIC' });
     }
-  }, [now, state?.matchId, state?.phase, state?.players.player1.challenge?.deadlineAt, state?.players.player2.challenge?.deadlineAt]);
+  }, [now, state?.matchId, state?.phase]);
 
   useEffect(() => {
     if (state?.phase !== 'ended' || !state.matchId || !state.winner) return;

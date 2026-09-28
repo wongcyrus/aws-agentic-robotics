@@ -329,6 +329,36 @@ describe('BattleApp', () => {
     await waitFor(() => expect(command).toHaveBeenCalledWith('match.beginCountdown'));
   });
 
+  it('does not describe an action deadline as overall battle time', async () => {
+    api.commentary.mockResolvedValue({ commentary: 'The battle remains evenly matched.' });
+    const players = makeState().players;
+    gameState = makeState({
+      phase: 'playing',
+      players: {
+        player1: {
+          ...players.player1,
+          challenge: { ...players.player1.challenge!, deadlineAt: Date.now() + 3000 }
+        },
+        player2: {
+          ...players.player2,
+          challenge: { ...players.player2.challenge!, deadlineAt: Date.now() + 3000 }
+        }
+      }
+    });
+    const { BattleApp } = await import('../pages/BattleApp');
+    render(<BattleApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(api.commentary).toHaveBeenCalledWith(
+      '/api/live-status',
+      expect.objectContaining({ eventType: 'PERIODIC' })
+    ));
+    const periodicBody = api.commentary.mock.calls.find(([, body]) => body.eventType === 'PERIODIC')?.[1];
+    expect(periodicBody).not.toHaveProperty('timeLeft');
+    expect(api.commentary).not.toHaveBeenCalledWith(
+      '/api/live-status',
+      expect.objectContaining({ eventType: 'TIME_CRITICAL' })
+    );
+  });
+
   it('does not let a stale introduction start a replacement match', async () => {
     let openingUtterance: { onend?: () => void } | undefined;
     vi.stubGlobal('speechSynthesis', {

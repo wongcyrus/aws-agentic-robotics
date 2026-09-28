@@ -153,7 +153,6 @@ def translate_detail(text: str) -> str:
         r"\brobotMoveBackward\b": "steps back defensively",
         r"\brobotTurnLeft\b": "executes a quick left rotation",
         r"\brobotTurnRight\b": "executes a quick right rotation",
-        r"\bOnly (\d+) seconds remaining in the match! The battle is near its end!": r"對戰只剩返 \1 秒！戰局即將結束！",
         r"\bThe scores are tied! Both players are neck and neck at (\d+)!": r"比分打成平手！雙方依家以 \1 比 \1 叮噹馬頭，勢均力敵！",
         r"\bPlayer 1 successfully activated\b": "P1 成功發動",
         r"\bPlayer 2 successfully activated\b": "P2 成功發動",
