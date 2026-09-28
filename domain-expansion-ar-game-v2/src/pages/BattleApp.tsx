@@ -148,8 +148,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         countdownSeconds: settings.countdownSeconds,
         scoreGraceMs: settings.scoreGraceMs,
         synchronizedGestures: settings.synchronizedGestures,
-        captureSnapshots: settings.aiPortraitEnabled ||
-          (settings.commentatorEnabled && settings.commentatorWebcam && settings.commentatorImagePolicy !== 'never')
+        captureSnapshots: true
       }
     });
   };
@@ -337,7 +336,6 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         <label><input type="checkbox" checked={settings.commentatorWebcam} onChange={(event) => setSettings({ ...settings, commentatorWebcam: event.target.checked })} /> {text.captureSnapshots}</label>
         <label>{text.imagePolicy}<select value={settings.commentatorImagePolicy} onChange={(event) => setSettings({ ...settings, commentatorImagePolicy: event.target.value as typeof settings.commentatorImagePolicy })}><option value="always">{text.always}</option><option value="start_end">{text.startEnd}</option><option value="never">{text.never}</option></select></label>
         <label><input type="checkbox" checked={settings.foulLanguage} onChange={(event) => setSettings({ ...settings, foulLanguage: event.target.checked })} /> {text.trashTalk}</label>
-        <label><input type="checkbox" checked={settings.aiPortraitEnabled} onChange={(event) => setSettings({ ...settings, aiPortraitEnabled: event.target.checked })} /> {text.aiPortrait}</label>
         <label>{text.avatarSize} <input type="range" min="150" max="700" step="10" value={settings.avatarSize} onChange={(event) => setSettings({ ...settings, avatarSize: Number(event.target.value) })} />{settings.avatarSize}px</label>
       </details>
       <button onClick={() => { saveSettings(settings); setShowSettings(false); }}>{text.saveHide}</button>
@@ -358,8 +356,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
             <b>VS</b>
             <div className="result-score player2"><span>{text.playerLabel(2)}</span><strong>{state.players.player2.score}</strong></div>
           </div>
-          {settings.aiPortraitEnabled && state.matchId &&
-            <ShareApp sessionId={state.matchId} winner={winnerSlug} language={settings.language} embedded />}
+          {state.matchId && <ShareApp sessionId={state.matchId} winner={winnerSlug} language={settings.language} embedded />}
           <button onClick={() => command('match.reset')}>{text.backLobby}</button>
         </>}
     </section>}

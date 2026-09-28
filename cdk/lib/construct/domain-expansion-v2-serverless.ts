@@ -202,7 +202,6 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
       "webcam-upload",
       "log",
       "register-room",
-      "enhance-portrait",
       "live-status",
       "battle-result",
       "trigger-technique",
@@ -212,10 +211,6 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
         authorizationType: apigateway.AuthorizationType.NONE,
       });
     }
-    api.addResource("check-enhancement").addMethod("GET", integration, {
-      authorizationType: apigateway.AuthorizationType.COGNITO,
-      authorizer,
-    });
     for (const route of authenticatedPostRoutes) {
       api.addResource(route).addMethod("POST", integration, {
         authorizationType: apigateway.AuthorizationType.COGNITO,

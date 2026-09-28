@@ -1,4 +1,3 @@
-import type { GestureName } from '../core/catalog';
 import type { PlayerRole } from '../core/protocol';
 import type { TokenProvider } from './auth';
 import type { CommentaryResponse } from './commentary';
@@ -36,13 +35,5 @@ export class ApiClient {
     return this.request<{ success: boolean; image?: string; message?: string }>(
       `/api/get-snapshot?sessionId=${encodeURIComponent(sessionId)}&role=${role}`
     );
-  }
-  enhancePortrait(sessionId: string, winner: PlayerRole | 'draw', domain?: GestureName | null, templateId = 'random') {
-    return this.request<{ success?: boolean; status?: string; url?: string; imageUrl?: string }>('/api/enhance-portrait', {
-      method: 'POST', body: JSON.stringify({ sessionId, winner, domain, templateId })
-    });
-  }
-  checkEnhancement(sessionId: string) {
-    return this.request<{ status: string; url?: string; imageUrl?: string }>(`/api/check-enhancement?sessionId=${encodeURIComponent(sessionId)}`);
   }
 }

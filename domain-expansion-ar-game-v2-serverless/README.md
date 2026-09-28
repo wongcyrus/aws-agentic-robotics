@@ -2,7 +2,7 @@
 
 This backend is isolated from the V1 Domain Expansion deployment. It provides:
 
-- Cognito-authorized REST APIs for robot actions, commentary, snapshots, and portraits.
+- Cognito-authorized REST APIs for robot actions, commentary, and snapshots.
 - A WebSocket coordinator using protocol version `2.0`.
 - DynamoDB-backed room state, connection state, revisions, and command idempotency.
 - Deadline-based challenges and reconnect-safe room snapshots.

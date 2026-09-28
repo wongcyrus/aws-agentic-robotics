@@ -27,7 +27,6 @@ const SettingsSchema = z.object({
   commentatorWebcam: z.boolean(),
   commentatorImagePolicy: z.enum(['always', 'start_end', 'never']),
   foulLanguage: z.boolean(),
-  aiPortraitEnabled: z.boolean(),
   avatarSize: z.number().int().min(150).max(700)
 });
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -58,7 +57,6 @@ export const defaultSettings: Settings = {
   commentatorWebcam: true,
   commentatorImagePolicy: 'start_end',
   foulLanguage: false,
-  aiPortraitEnabled: true,
   avatarSize: 350
 };
 

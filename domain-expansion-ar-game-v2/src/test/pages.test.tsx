@@ -12,9 +12,7 @@ const api = {
   registerRoom: vi.fn(),
   commentary: vi.fn(),
   uploadSnapshot: vi.fn(),
-  getSnapshot: vi.fn(),
-  enhancePortrait: vi.fn(),
-  checkEnhancement: vi.fn()
+  getSnapshot: vi.fn()
 };
 const cameraStart = vi.fn();
 const cameraStop = vi.fn();
@@ -44,8 +42,6 @@ vi.mock('../services/apiClient', () => ({
     commentary = api.commentary;
     uploadSnapshot = api.uploadSnapshot;
     getSnapshot = api.getSnapshot;
-    enhancePortrait = api.enhancePortrait;
-    checkEnhancement = api.checkEnhancement;
   }
 }));
 vi.mock('../services/config', () => ({
@@ -410,13 +406,14 @@ describe('BattleApp', () => {
 });
 
 describe('ShareApp', () => {
-  it('loads captures, generates, downloads, and shares a portrait', async () => {
+  it('loads, downloads, and shares player captures', async () => {
     history.replaceState({}, '', '/share.html?session=match-1&winner=player1');
     api.getSnapshot
       .mockResolvedValueOnce({ success: true, image: 'https://img.test/p1.jpg' })
       .mockResolvedValueOnce({ success: true, image: 'https://img.test/p2.jpg' });
-    api.enhancePortrait.mockResolvedValue({ imageUrl: 'https://img.test/portrait.jpg' });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('image', { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(
+      () => Promise.resolve(new Response('image', { status: 200 }))
+    ));
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() });
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) }
@@ -425,12 +422,10 @@ describe('ShareApp', () => {
     const { ShareApp } = await import('../pages/ShareApp');
     render(<ShareApp />);
     await screen.findByAltText('Player 1 match capture');
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ink-wash' } });
-    fireEvent.click(screen.getByText('Generate AI portrait'));
-    await screen.findByAltText('AI enhanced battle portrait');
-    expect(api.enhancePortrait).toHaveBeenCalledWith('match-1', 'player1', undefined, 'ink-wash');
+    expect(screen.queryByText('Generate AI portrait')).toBeNull();
+    expect(screen.queryByRole('combobox')).toBeNull();
     fireEvent.click(screen.getByText('Download images'));
-    await waitFor(() => expect(click).toHaveBeenCalled());
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByText('Share result'));
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(location.href));
   });

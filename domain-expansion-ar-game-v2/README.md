@@ -7,7 +7,7 @@ Independent React + TypeScript + Vite rewrite of the AR player, battle viewer, p
 - `index.html`: player camera, MediaPipe gesture recognition, VFX, authoritative battle scoring, standalone solo rounds, configurable playback, and throttled robot calls.
 - `battle.html`: authoritative room view, WebRTC streams, match controls, configurable rules/layout, score-grace cinematics, event commentary, browser/Polly TTS, the interactive Shizuku Live2D co-host, and results.
 - `player.html`: origin-validated popup media surface.
-- `share.html`: resolved snapshot images, portrait enhancement status, download, and Web Share/clipboard actions.
+- `share.html`: resolved snapshot images, download, and Web Share/clipboard actions.
 - Player, battle, result, and Scroll of Honor UI supports English, Hong Kong
   Traditional Chinese, Taiwan Traditional Chinese, and Japanese.
 - `src/core/protocol.ts`: typed Zod wire protocol with runtime validation.
@@ -118,7 +118,7 @@ Replace `public/config.json` at deployment time:
 }
 ```
 
-The API client explicitly adds a stored Cognito ID token to its own requests. It never patches global `fetch`. Supported surfaces are `/api/register-room`, `/api/trigger-technique`, `/api/live-status`, `/api/battle-result`, `/api/webcam-upload`, `/api/get-snapshot`, `/api/enhance-portrait`, and `/api/check-enhancement`.
+The API client explicitly adds a stored Cognito ID token to its own requests. It never patches global `fetch`. Supported surfaces are `/api/register-room`, `/api/trigger-technique`, `/api/live-status`, `/api/battle-result`, `/api/webcam-upload`, and `/api/get-snapshot`.
 
 The production WebSocket coordinator must implement the schemas in `src/core/protocol.ts`. WebRTC media is peer-to-peer; only offers, answers, and ICE candidates use the control socket.
 

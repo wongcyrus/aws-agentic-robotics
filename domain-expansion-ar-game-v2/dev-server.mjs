@@ -379,10 +379,6 @@ const handleApi = async (request, response) => {
       }
       return true;
     }
-    if (url.pathname === '/api/enhance-portrait' || url.pathname === '/api/check-enhancement') {
-      json(response, 200, { success: false, status: 'NONE' });
-      return true;
-    }
     json(response, 404, { success: false, message: 'Unknown local API route' });
     return true;
   } catch (error) {

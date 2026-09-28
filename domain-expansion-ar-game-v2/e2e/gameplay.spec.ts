@@ -112,8 +112,7 @@ test('browser gesture fixtures reach every production recognizer branch', async 
 
 test('three isolated browsers complete dual-success gameplay and reset', async ({ browser }) => {
   const value = await arena(browser, 'full', {
-    synchronizedGestures: false,
-    aiPortraitEnabled: true
+    synchronizedGestures: false
   });
   await expect(value.viewer.locator('.fighter.player1')).toContainText('Waiting for player 1 stream');
   await expect(value.player1.locator('.role-pill')).toContainText(`PLAYER 1 · ${value.room}`);

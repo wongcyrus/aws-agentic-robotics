@@ -156,7 +156,6 @@ def dispatch_event(
     context,
     *,
     authorizer=None,
-    sqs_handler=None,
     websocket_handler=None,
     http_handler=None,
     metrics_emitter: MetricsEmitter = metrics,
@@ -177,27 +176,12 @@ def dispatch_event(
             authorizer = auth_handler
         return authorizer(event, context)
     
-    # 1. Check for SQS Trigger
-    if "Records" in event:
-        if sqs_handler is None:
-            from image_processor import handle_sqs_image_gen
-
-            sqs_handler = handle_sqs_image_gen
-        for record in event["Records"]:
-            if record.get("eventSource") == "aws:sqs":
-                try:
-                    sqs_handler(record)
-                except Exception:
-                    metrics_emitter.emit(Metric("SqsImageGenerationFailure"))
-                    logger.exception("SQS generation failed")
-        return {"statusCode": 200, "body": "SQS Records processed."}
-    
-    # 2. Detect WebSocket API Gateway connection
+    # 1. Detect WebSocket API Gateway connection
     request_context = event.get("requestContext", {})
     if "connectionId" in request_context:
         return (websocket_handler or handle_websocket)(event, request_context)
         
-    # 3. Treat as HTTP API Gateway REST call
+    # 2. Treat as HTTP API Gateway REST call
     return (http_handler or handle_http)(event)
 
 
@@ -237,97 +221,10 @@ def handle_http(event):
     if path == "/health":
         return {"statusCode": 200, "headers": headers, "body": json.dumps({"status": "healthy"})}
 
-    def snapshot_exists_for_session(session_id, role):
-        photos_bucket = os.environ.get("PHOTOS_S3_BUCKET")
-        if not photos_bucket:
-            return False
-        try:
-            boto3.client("s3").head_object(
-                Bucket=photos_bucket,
-                Key=f"webcam_snapshots/{session_id}/{role}.jpg"
-            )
-            return True
-        except Exception:
-            return False
-
     body = parse_json_body(event)
 
-    # Endpoint: /api/enhance-portrait (POST)
-    if path == "/api/enhance-portrait" and method == "POST":
-        session_id = normalize_session_id(body.get("sessionId", "mcpserver"))
-            
-        template_id = body.get("templateId", "random")
-        logger.info(f"Enhance portrait triggered: session={session_id}, template={template_id}")
-        debug = {
-            "sessionId": session_id,
-            "templateId": template_id,
-            "awsImageGenerationEnabled": False,
-            "photosBucketConfigured": bool(os.environ.get("PHOTOS_S3_BUCKET")),
-            "hasSnapshotP1": snapshot_exists_for_session(session_id, "player1"),
-            "hasSnapshotP2": snapshot_exists_for_session(session_id, "player2"),
-        }
-
-        disabled_status = "ERROR: AWS_IMAGE_GENERATION_DISABLED"
-
-        try:
-            get_sessions_table().update_item(
-                Key={"session_id": session_id},
-                UpdateExpression="SET enhanced_image_url = :status, updated_at = :t",
-                ExpressionAttributeValues={
-                    ":status": disabled_status,
-                    ":t": int(time.time())
-                }
-            )
-        except Exception as e:
-            logger.error(f"Failed to update DynamoDB session state: {e}")
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": f"Database lock failed: {e}"})}
-
-        return {
-            "statusCode": 200,
-            "headers": headers,
-            "body": json.dumps({"success": True, "status": disabled_status, "debug": debug})
-        }
-
-    # Endpoint: /api/check-enhancement (GET)
-    elif path == "/api/check-enhancement" and method == "GET":
-        q_params = event.get("queryStringParameters", {}) or {}
-        session_id = normalize_session_id(q_params.get("sessionId", "mcpserver"))
-            
-        logger.info(f"Check enhancement status for session={session_id}")
-
-        try:
-            resp = get_sessions_table().get_item(Key={"session_id": session_id})
-            item = resp.get("Item", {})
-            enhanced_url = item.get("enhanced_image_url", "")
-            
-            status = "NONE"
-            if enhanced_url == "PENDING":
-                status = "PENDING"
-            elif isinstance(enhanced_url, str) and enhanced_url.startswith("ERROR:"):
-                status = enhanced_url
-            elif enhanced_url:
-                status = "COMPLETE"
-
-            return {
-                "statusCode": 200,
-                "headers": headers,
-                "body": json.dumps(normalize_json_value({
-                    "success": True,
-                    "status": status,
-                    "url": enhanced_url if status == "COMPLETE" else "",
-                    "debug": {
-                        "sessionFound": bool(item),
-                        "rawEnhancedImageValue": enhanced_url,
-                        "updatedAt": item.get("updated_at"),
-                    }
-                }))
-            }
-        except Exception as e:
-            logger.error(f"Failed to fetch session status: {e}")
-            return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
-
     # Endpoint: /api/get-snapshot (GET)
-    elif path == "/api/get-snapshot" and method == "GET":
+    if path == "/api/get-snapshot" and method == "GET":
         q_params = event.get("queryStringParameters", {}) or {}
         session_id = q_params.get("sessionId", "mcpserver")
         if not session_id or not isinstance(session_id, str) or not session_id.strip():

@@ -22,10 +22,8 @@ def test_lambda_entry_point_keeps_aws_signature():
 
 
 def test_lambda_handler_dispatches_injected_handlers():
-    records = []
     handlers = {
         "authorizer": lambda event, context: {"kind": "auth"},
-        "sqs_handler": records.append,
         "websocket_handler": lambda event, context: {"kind": "ws"},
         "http_handler": lambda event: {"kind": "http"},
     }
@@ -33,14 +31,6 @@ def test_lambda_handler_dispatches_injected_handlers():
     assert lambda_function.dispatch_event(
         {"type": "REQUEST", "methodArn": "arn"}, None, **handlers
     ) == {"kind": "auth"}
-    sqs_event = {
-        "Records": [
-            {"eventSource": "aws:sqs", "messageId": "one"},
-            {"eventSource": "other", "messageId": "two"},
-        ]
-    }
-    assert lambda_function.dispatch_event(sqs_event, None, **handlers)["statusCode"] == 200
-    assert [record["messageId"] for record in records] == ["one"]
     assert lambda_function.dispatch_event(
         {"requestContext": {"connectionId": "c"}}, None, **handlers
     ) == {"kind": "ws"}
@@ -339,7 +329,7 @@ def test_live_status_attaches_both_s3_images(monkeypatch):
     assert _body(response)["debugImageContext"]["hasImageP1"] is True
 
 
-def test_enhancement_and_upload_database_failures(monkeypatch):
+def test_upload_database_failure(monkeypatch):
     monkeypatch.setattr(
         lambda_function,
         "sessions_table",
@@ -347,10 +337,6 @@ def test_enhancement_and_upload_database_failures(monkeypatch):
             update_item=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("db down"))
         ),
     )
-    enhance = lambda_function.handle_http(
-        {"path": "/api/enhance-portrait", "httpMethod": "POST", "body": "{}"}
-    )
-    assert enhance["statusCode"] == 500
     monkeypatch.delenv("PHOTOS_S3_BUCKET", raising=False)
     upload = lambda_function.handle_http(
         {

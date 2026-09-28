@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PlayerRole } from '../core/protocol';
 import { uiText, type UiLanguage } from '../core/uiText';
 import { ApiClient } from '../services/apiClient';
@@ -6,12 +6,9 @@ import { LocalStorageTokenProvider } from '../services/auth';
 import { loadConfig } from '../services/config';
 
 type SnapshotState = Partial<Record<PlayerRole, string>>;
-type PortraitStatus = 'idle' | 'loading' | 'complete' | 'error';
-
 type ShareAppProps = {
   sessionId?: string;
   winner?: string;
-  autostart?: boolean;
   embedded?: boolean;
   language?: UiLanguage;
 };
@@ -19,7 +16,6 @@ type ShareAppProps = {
 export function ShareApp({
   sessionId: suppliedSessionId,
   winner: suppliedWinner,
-  autostart: suppliedAutostart,
   embedded = false,
   language = 'en'
 }: ShareAppProps = {}) {
@@ -27,15 +23,9 @@ export function ShareApp({
   const query = useMemo(() => new URLSearchParams(location.search), []);
   const sessionId = suppliedSessionId ?? query.get('session') ?? '';
   const winner = suppliedWinner ?? query.get('winner') ?? 'draw';
-  const autostart = suppliedAutostart ?? query.get('autostart') === '1';
   const [api, setApi] = useState<ApiClient>();
   const [snapshots, setSnapshots] = useState<SnapshotState>({});
   const [snapshotMessage, setSnapshotMessage] = useState(text.loadingCaptures);
-  const [portrait, setPortrait] = useState(query.get('portrait'));
-  const [portraitStatus, setPortraitStatus] = useState<PortraitStatus>(portrait ? 'complete' : 'idle');
-  const [portraitMessage, setPortraitMessage] = useState(text.portraitAvailable);
-  const [templateId, setTemplateId] = useState('random');
-  const startedAutomatically = useRef(false);
 
   useEffect(() => {
     void loadConfig().then((config) => {
@@ -43,7 +33,6 @@ export function ShareApp({
         setApi(new ApiClient(config.apiBaseUrl, new LocalStorageTokenProvider()));
       } else {
         setSnapshotMessage(text.capturesRequireApi);
-        setPortraitMessage(text.portraitRequiresApi);
       }
     });
   }, []);
@@ -85,71 +74,6 @@ export function ShareApp({
     return () => { cancelled = true; };
   }, [api, sessionId, text]);
 
-  const pollEnhancement = useCallback(async () => {
-    if (!api || !sessionId) return;
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 60_000) {
-      const current = await api.checkEnhancement(sessionId);
-      const imageUrl = current.url || current.imageUrl;
-      if (current.status === 'COMPLETE' && imageUrl) {
-        setPortrait(imageUrl);
-        setPortraitStatus('complete');
-        setPortraitMessage(text.portraitReady);
-        return;
-      }
-      if (current.status.startsWith('ERROR:')) {
-        setPortraitStatus('error');
-        setPortraitMessage(current.status.replace('ERROR:', '').trim().replaceAll('_', ' '));
-        return;
-      }
-      if (current.status === 'NONE') {
-        setPortraitStatus('error');
-        setPortraitMessage(text.portraitUnavailable);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-    setPortraitStatus('error');
-    setPortraitMessage(text.portraitTimedOut);
-  }, [api, sessionId, text]);
-
-  const enhance = useCallback(async () => {
-    if (!api || !sessionId || portraitStatus === 'loading') return;
-    setPortraitStatus('loading');
-    setPortraitMessage(text.generatingScroll);
-    try {
-      const result = await api.enhancePortrait(
-        sessionId,
-        winner as PlayerRole | 'draw',
-        undefined,
-        templateId
-      );
-      const imageUrl = result.url || result.imageUrl;
-      if (imageUrl) {
-        setPortrait(imageUrl);
-        setPortraitStatus('complete');
-        setPortraitMessage(text.portraitReady);
-        return;
-      }
-      if (result.status?.startsWith('ERROR:')) {
-        setPortraitStatus('error');
-        setPortraitMessage(result.status.replace('ERROR:', '').trim().replaceAll('_', ' '));
-        return;
-      }
-      await pollEnhancement();
-    } catch (error) {
-      console.error('Portrait enhancement failed', error);
-      setPortraitStatus('error');
-      setPortraitMessage(error instanceof Error ? error.message : text.portraitFailed);
-    }
-  }, [api, pollEnhancement, portraitStatus, sessionId, templateId, text, winner]);
-
-  useEffect(() => {
-    if (!autostart || !api || !sessionId || startedAutomatically.current) return;
-    startedAutomatically.current = true;
-    void enhance();
-  }, [api, autostart, enhance, sessionId]);
-
   const download = async (url: string, filename: string) => {
     try {
       const response = await fetch(url);
@@ -166,10 +90,6 @@ export function ShareApp({
     }
   };
   const downloadAvailable = () => {
-    if (portrait) {
-      void download(portrait, `jjk_match_result_${sessionId}.jpg`);
-      return;
-    }
     (Object.entries(snapshots) as [PlayerRole, string][]).forEach(([role, url]) => {
       void download(url, `jjk_${role}_capture_${sessionId}.jpg`);
     });
@@ -186,7 +106,7 @@ export function ShareApp({
     }
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(location.href);
-      setPortraitMessage(text.shareCopied);
+      setSnapshotMessage(text.shareCopied);
       return;
     }
     window.prompt(text.copyResultLink, location.href);
@@ -209,22 +129,8 @@ export function ShareApp({
       </figure>)}
     </section>
     {snapshotMessage && <p className="status-message">{snapshotMessage}</p>}
-    <section className={`portrait portrait-${portraitStatus}`}>
-      {portrait
-        ? <img src={portrait} alt="AI enhanced battle portrait" />
-        : <><div className="orb" /><p>{portraitMessage}</p></>}
-    </section>
     <div className="share-actions">
-      <select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
-        <option value="random">{text.randomStyle}</option>
-        <option value="cyberpunk">{text.cyberpunk}</option>
-        <option value="ink-wash">{text.inkShadow}</option>
-        <option value="neon-glow">{text.neonForce}</option>
-      </select>
-      <button className="primary" disabled={!api || !sessionId || portraitStatus === 'loading'} onClick={() => void enhance()}>
-        {portraitStatus === 'loading' ? text.generating : text.generatePortrait}
-      </button>
-      <button disabled={!portrait && Object.keys(snapshots).length === 0} onClick={downloadAvailable}>{text.downloadImages}</button>
+      <button disabled={Object.keys(snapshots).length === 0} onClick={downloadAvailable}>{text.downloadImages}</button>
       <button onClick={() => void share()}>{text.shareResult}</button>
     </div>
   </>;

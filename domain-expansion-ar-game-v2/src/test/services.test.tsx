@@ -105,7 +105,7 @@ describe('authentication and API client', () => {
     expect((init?.headers as Headers).get('Authorization')).toBe('Bearer token');
     expect((init?.headers as Headers).get('Content-Type')).toBe('application/json');
     await expect(client.getSnapshot('match one', 'player1')).resolves.toBeInstanceOf(Blob);
-    await expect(client.checkEnhancement('match')).rejects.toThrow('API 503: broken');
+    await expect(client.commentary('/api/live-status', {})).rejects.toThrow('API 503: broken');
   });
 
   it('covers every public API route', async () => {
@@ -116,9 +116,8 @@ describe('authentication and API client', () => {
     await client.registerRoom('s', 'ROOM', 'wss://socket');
     await client.commentary('/api/live-status', { eventType: 'RESET' });
     await client.uploadSnapshot('s', 'player2', 'END', 'image');
-    await client.enhancePortrait('s', 'draw', 'Hollow Purple', 'ink');
     expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
-      '/api/register-room', '/api/live-status', '/api/webcam-upload', '/api/enhance-portrait'
+      '/api/register-room', '/api/live-status', '/api/webcam-upload'
     ]);
   });
 });

@@ -38,7 +38,6 @@ const defaultSettings = {
   commentatorWebcam: false,
   commentatorImagePolicy: 'never',
   foulLanguage: false,
-  aiPortraitEnabled: false,
   avatarSize: 350
 };
 
