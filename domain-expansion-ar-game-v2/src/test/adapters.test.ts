@@ -117,4 +117,11 @@ describe('browser adapters', () => {
     expect(effect).not.toContain('fillText');
     expect(effect).not.toContain('symbols');
   });
+
+  it('pre-mirrors Idle Death Gamble numbers for the mirrored VFX composite', () => {
+    const source = readFileSync(resolve('public/legacy/domain_expansion.js'), 'utf8');
+    const effect = source.match(/applyIdleDeathGamble\(ctx, w, h\) \{([\s\S]*?)\n    \}\n\n    applyYujiDomain/)?.[1];
+    expect(effect).toBeDefined();
+    expect(effect).toMatch(/ctx\.translate\(w, 0\);\s*ctx\.scale\(-1, 1\);[\s\S]*?ctx\.fillText/);
+  });
 });

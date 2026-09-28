@@ -511,8 +511,12 @@ class DomainExpansionGame {
 
         ctx.fillStyle = "rgba(255, 215, 0, 0.2)"; ctx.fillRect(0, 0, w, h);
         if (this.hakariPhase % 3 === 0) this.slotNumbers = [Math.floor(Math.random()*10).toString(), Math.floor(Math.random()*10).toString(), Math.floor(Math.random()*10).toString()];
+        ctx.save();
+        ctx.translate(w, 0);
+        ctx.scale(-1, 1);
         ctx.fillStyle = "white"; ctx.font = "bold 40px Arial"; ctx.textAlign = "center";
         ctx.fillText(`[${this.slotNumbers[0]}] [${this.slotNumbers[1]}] [${this.slotNumbers[2]}]`, w/2, h - 50);
+        ctx.restore();
         if (this.confetti.length === 0) { for(let i=0; i<50; i++) this.confetti.push({ x: Math.random()*w, y: Math.random()*h, speed: 2+Math.random()*3, color: ["#FFFF00", "#FFD700", "#FFFFFF"][Math.floor(Math.random()*3)] }); }
         this.confetti.forEach(p => { p.y = (p.y + p.speed) % h; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
     }
