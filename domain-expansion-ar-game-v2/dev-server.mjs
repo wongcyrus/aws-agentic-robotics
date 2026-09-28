@@ -270,13 +270,19 @@ const handleApi = async (request, response) => {
       }
       try {
         json(response, 200, await generateCommentary(body, url.pathname));
-      } catch (error) {
-        console.error('Local Bedrock commentary failed', error);
-        const errorName = error instanceof Error && error.name ? error.name : 'BedrockError';
-        json(response, 502, {
-          success: false,
-          message: `Local AI commentary failed (${errorName}). Check AWS credentials, Bedrock model access, BEDROCK_REGION, and BEDROCK_MODEL_ID.`
-        });
+      } catch (localError) {
+        console.warn('Local Bedrock commentary failed; trying deployed Lambda', localError);
+        try {
+          json(response, 200, await invokeDeployedCommentary(body, url.pathname));
+        } catch (lambdaError) {
+          console.error('Deployed commentary fallback failed', lambdaError);
+          const localName = localError instanceof Error && localError.name ? localError.name : 'BedrockError';
+          const lambdaName = lambdaError instanceof Error && lambdaError.name ? lambdaError.name : 'LambdaError';
+          json(response, 502, {
+            success: false,
+            message: `Local AI commentary failed through Bedrock (${localName}) and Lambda (${lambdaName}). Check AWS credentials and model access.`
+          });
+        }
       }
       return true;
     }
