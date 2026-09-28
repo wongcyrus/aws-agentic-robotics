@@ -41,8 +41,9 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const [showResultVideo, setShowResultVideo] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
   const [live2dSpeaking, setLive2dSpeaking] = useState(false);
+  const [live2dAudio, setLive2dAudio] = useState<HTMLAudioElement>();
   const peers = useRef<WebRtcSessionService | undefined>(undefined);
-  const commentaryPlayer = useRef(new CommentaryPlayer(setLive2dSpeaking));
+  const commentaryPlayer = useRef(new CommentaryPlayer(setLive2dSpeaking, setLive2dAudio));
   const requestedPlayers = useRef(new Set<string>());
   const completedCountdown = useRef<string | null>(null);
   const completedResolution = useRef<string | null>(null);
@@ -293,7 +294,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     <div className="power-bar"><span style={{ width: `${p1Score / scoreTotal * 100}%` }} /><span style={{ width: `${p2Score / scoreTotal * 100}%` }} /></div>
     <div className="battle-ticker">{ticker.slice(-3).map((entry, index) => <span key={`${entry}-${index}`}>{entry}</span>)}</div>
     {settings.commentatorEnabled &&
-      <Live2DCommentator speaking={live2dSpeaking} size={settings.avatarSize} />}
+      <Live2DCommentator audioElement={live2dAudio} speaking={live2dSpeaking} size={settings.avatarSize} />}
     <section className="commentary" style={{ '--avatar-size': `${settings.avatarSize}px` } as React.CSSProperties}>
       <img src="/static/img/commentator_avatar.png" alt={text.aiCommentator} />
       <div><p>{settings.commentatorEnabled ? commentary : text.commentatorDisabled}</p>{commentaryError && <small>{commentaryError}</small>}</div>

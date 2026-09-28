@@ -7,6 +7,7 @@ type Live2DCore = {
 };
 
 type Live2DModel = {
+  autoUpdate?: boolean;
   anchor?: { set: (x: number, y: number) => void };
   focus?: (x: number, y: number) => void;
   getLocalBounds?: () => { x: number; y: number; width: number; height: number };
@@ -17,6 +18,7 @@ type Live2DModel = {
     update: (...args: unknown[]) => void;
   };
   scale: { set: (value: number) => void };
+  update: (deltaMilliseconds: number) => void;
   width: number;
   x: number;
   y: number;
@@ -44,7 +46,15 @@ const scripts = [
   'https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism2.min.js'
 ];
 const modelUrl = 'https://cdn.jsdelivr.net/npm/live2d-widget-model-shizuku@latest/assets/shizuku.model.json';
-const mouthParameters = ['ParamMouthOpenY', 'PARAM_MOUTH_OPEN_Y', 'ParamMouthOpen', 'PARAM_MOUTH_OPEN', 'ParamA'];
+const mouthParameters = [
+  'ParamMouthOpenY',
+  'PARAM_MOUTH_OPEN_Y',
+  'PARAM_MOUTH_OPENY',
+  'ParamMouthOpen',
+  'PARAM_MOUTH_OPEN',
+  'ParamA',
+  'PARAM_A'
+];
 
 function loadScript(src: string) {
   const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
@@ -93,15 +103,26 @@ function fitModel(model: Live2DModel) {
   model.y = 500 - (bounds.y + bounds.height) * scale + 85;
 }
 
-export function Live2DCommentator({ speaking, size }: { speaking: boolean; size: number }) {
+export function Live2DCommentator({
+  audioElement,
+  speaking,
+  size
+}: {
+  audioElement?: HTMLAudioElement;
+  speaking: boolean;
+  size: number;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const speakingRef = useRef(speaking);
+  const audioRef = useRef(audioElement);
   speakingRef.current = speaking;
+  audioRef.current = audioElement;
 
   useEffect(() => {
     if (!canvasRef.current || typeof WebGLRenderingContext === 'undefined') return;
     let active = true;
     let app: PixiApplication | undefined;
+    let animationFrame = 0;
     let removeFocus: (() => void) | undefined;
     void (async () => {
       try {
@@ -118,19 +139,36 @@ export function Live2DCommentator({ speaking, size }: { speaking: boolean; size:
         });
         const model = await window.PIXI.live2d.Live2DModel.from(modelUrl);
         if (!active) return;
-        model.internalModel.update(0);
+        model.autoUpdate = false;
+        model.update(0);
         app.stage.addChild(model);
         fitModel(model);
         let smoothedMouth = 0;
-        const originalUpdate = model.internalModel.update.bind(model.internalModel);
-        model.internalModel.update = (...args) => {
-          originalUpdate(...args);
-          const target = speakingRef.current
-            ? Math.min((Math.sin(Date.now() * .015) * .45 + .45) + Math.random() * .2, 1)
-            : 0;
-          smoothedMouth += (target - smoothedMouth) * .35;
+        let lastFrameAt = performance.now();
+        const update = (frameNow: number) => {
+          if (!active) return;
+          const delta = Math.max(0, frameNow - lastFrameAt);
+          lastFrameAt = frameNow;
+          model.update(delta);
+          const audio = audioRef.current;
+          let target = 0;
+          if (audio && !audio.paused && !audio.ended) {
+            const time = Number.isFinite(audio.currentTime) ? audio.currentTime : frameNow / 1000;
+            const waveA = (Math.sin(time * 10.7) + 1) * .5;
+            const waveB = (Math.sin(time * 17.9 + .8) + 1) * .5;
+            const waveC = (Math.sin(time * 27.4 + 1.7) + 1) * .5;
+            target = .55 + (waveA * .42 + waveB * .36 + waveC * .22) * .4;
+          } else if (speakingRef.current) {
+            const time = frameNow / 1000;
+            const waveA = (Math.sin(time * 11.7) + 1) * .5;
+            const waveB = (Math.sin(time * 19.1 + .8) + 1) * .5;
+            target = .55 + (waveA * .58 + waveB * .42) * .4;
+          }
+          smoothedMouth += (target - smoothedMouth) * .75;
           setMouth(model, smoothedMouth);
+          animationFrame = requestAnimationFrame(update);
         };
+        animationFrame = requestAnimationFrame(update);
         const focus = (event: MouseEvent) => model.focus?.(event.clientX, event.clientY);
         window.addEventListener('mousemove', focus);
         removeFocus = () => window.removeEventListener('mousemove', focus);
@@ -140,6 +178,7 @@ export function Live2DCommentator({ speaking, size }: { speaking: boolean; size:
     })();
     return () => {
       active = false;
+      if (animationFrame) cancelAnimationFrame(animationFrame);
       removeFocus?.();
       app?.destroy(true, { children: true, texture: true, baseTexture: true });
     };

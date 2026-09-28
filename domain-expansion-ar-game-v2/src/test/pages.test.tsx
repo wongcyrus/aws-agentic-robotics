@@ -357,6 +357,7 @@ describe('Live2DCommentator', () => {
     const setMouth = vi.fn();
     const focus = vi.fn();
     const model = {
+      autoUpdate: true,
       anchor: { set: vi.fn() },
       focus,
       getLocalBounds: () => ({ x: 0, y: 0, width: 200, height: 400 }),
@@ -366,6 +367,7 @@ describe('Live2DCommentator', () => {
         update: vi.fn()
       },
       scale: { set: vi.fn() },
+      update: vi.fn(),
       width: 200,
       x: 0,
       y: 0
@@ -381,10 +383,24 @@ describe('Live2DCommentator', () => {
       live2d: { Live2DModel: { from: vi.fn().mockResolvedValue(model) } }
     };
     const { Live2DCommentator } = await import('../components/Live2DCommentator');
-    const view = render(<Live2DCommentator speaking size={350} />);
+    const audio = {
+      paused: false,
+      ended: false,
+      currentTime: 1.25
+    } as HTMLAudioElement;
+    const view = render(<Live2DCommentator audioElement={audio} speaking size={350} />);
     await waitFor(() => expect(addChild).toHaveBeenCalledWith(model));
-    model.internalModel.update();
-    expect(setMouth).toHaveBeenCalled();
+    await waitFor(() => expect(setMouth).toHaveBeenCalled());
+    expect(model.autoUpdate).toBe(false);
+    expect(model.update).toHaveBeenCalled();
+    const openValues = () => setMouth.mock.calls
+      .filter(([id]) => id === 'ParamMouthOpenY')
+      .map(([, value]) => value as number);
+    await waitFor(() => expect(openValues().at(-1)).toBeGreaterThan(.5));
+    const speakingValue = openValues().at(-1) ?? 0;
+    audio.paused = true;
+    view.rerender(<Live2DCommentator audioElement={audio} speaking={false} size={350} />);
+    await waitFor(() => expect(openValues().at(-1)).toBeLessThan(speakingValue));
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 12, clientY: 34 }));
     expect(focus).toHaveBeenCalledWith(12, 34);
     view.unmount();

@@ -158,6 +158,38 @@ describe('configuration, commentary and auth gate', () => {
     await player.play({ commentary: 'ignored' }, { ...defaultSettings, commentatorEnabled: false });
   });
 
+  it('exposes the active AWS audio clock and clears it when playback ends', async () => {
+    vi.stubGlobal('speechSynthesis', { cancel: vi.fn() });
+    let audioInstance: {
+      onplay?: () => void;
+      onended?: () => void;
+      onerror?: () => void;
+    } | undefined;
+    vi.stubGlobal('Audio', class {
+      volume = 0; paused = false; ended = false; currentTime = 0;
+      onplay?: () => void; onended?: () => void; onerror?: () => void;
+      pause = vi.fn(); removeAttribute = vi.fn(); load = vi.fn();
+      play = vi.fn(async () => {
+        this.onplay?.();
+      });
+      constructor() {
+        audioInstance = this;
+      }
+    });
+    const speakingChanges: boolean[] = [];
+    const audioChanges: Array<HTMLAudioElement | undefined> = [];
+    const player = new CommentaryPlayer(
+      (speaking) => speakingChanges.push(speaking),
+      (audio) => audioChanges.push(audio)
+    );
+    await player.play({ commentary: 'Domain!', ttsMode: 'aws', audioUrl: '/speech.mp3' }, defaultSettings);
+    expect(audioChanges.at(-1)).toBeDefined();
+    expect(speakingChanges.at(-1)).toBe(true);
+    audioInstance?.onended?.();
+    expect(audioChanges.at(-1)).toBeUndefined();
+    expect(speakingChanges.at(-1)).toBe(false);
+  });
+
   it('authenticates through the gate and renders children', async () => {
     vi.resetModules();
     vi.stubGlobal('fetch', vi.fn()
