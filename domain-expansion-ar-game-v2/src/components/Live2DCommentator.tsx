@@ -118,6 +118,7 @@ export function Live2DCommentator({ speaking, size }: { speaking: boolean; size:
         });
         const model = await window.PIXI.live2d.Live2DModel.from(modelUrl);
         if (!active) return;
+        model.internalModel.update(0);
         app.stage.addChild(model);
         fitModel(model);
         let smoothedMouth = 0;
