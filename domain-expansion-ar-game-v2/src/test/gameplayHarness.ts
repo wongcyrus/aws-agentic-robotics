@@ -93,6 +93,15 @@ export class InMemoryGameCoordinator {
       return;
     }
     if (!this.state || this.state.phase === 'idle' || this.state.phase === 'ended') return;
+    if (type === 'match.beginCountdown') {
+      if (this.state.phase !== 'preparing') return;
+      record.accepted = true;
+      this.update({
+        phase: 'countdown',
+        countdownEndsAt: Date.now() + this.state.config.countdownSeconds * 1000
+      });
+      return;
+    }
     if (type === 'match.countdownCompleted') {
       if (this.state.phase !== 'countdown' || Date.now() < (this.state.countdownEndsAt ?? Infinity)) return;
       record.accepted = true;
@@ -132,10 +141,10 @@ export class InMemoryGameCoordinator {
       roomId: 'SIM1',
       matchId: `sim-${++this.matchSequence}`,
       revision: ++this.revision,
-      phase: 'countdown',
+      phase: 'preparing',
       config,
       players: { player1: player(), player2: player() },
-      countdownEndsAt: Date.now() + config.countdownSeconds * 1000,
+      countdownEndsAt: null,
       resolution: null,
       cinematic: null,
       winner: null,

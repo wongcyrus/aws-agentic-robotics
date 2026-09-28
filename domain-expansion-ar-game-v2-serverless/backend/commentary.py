@@ -245,12 +245,18 @@ def direct_bedrock_fallback(
 
         messages = [{"role": "user", "content": content_list}]
 
-        response = bedrock_client.converse(
-            modelId=BEDROCK_MODEL_ID,
-            messages=messages,
-            system=[{"text": system_prompt}],
-            inferenceConfig={"maxTokens": 200},
-        )
+        def invoke(max_tokens):
+            return bedrock_client.converse(
+                modelId=BEDROCK_MODEL_ID,
+                messages=messages,
+                system=[{"text": system_prompt}],
+                inferenceConfig={"maxTokens": max_tokens},
+            )
+
+        response = invoke(400)
+        if response.get("stopReason") == "max_tokens":
+            logger.warning("Bedrock commentary reached 400 output tokens; retrying with 800.")
+            response = invoke(800)
 
         content = response["output"]["message"]["content"]
         commentary = next(

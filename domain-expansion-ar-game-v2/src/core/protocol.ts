@@ -6,7 +6,7 @@ export const RoleSchema = z.enum(['player1', 'player2', 'viewer']);
 export type Role = z.infer<typeof RoleSchema>;
 export const PlayerRoleSchema = z.enum(['player1', 'player2']);
 export type PlayerRole = z.infer<typeof PlayerRoleSchema>;
-export const MatchPhaseSchema = z.enum(['idle', 'countdown', 'playing', 'resolving', 'cinematic', 'ended']);
+export const MatchPhaseSchema = z.enum(['idle', 'preparing', 'countdown', 'playing', 'resolving', 'cinematic', 'ended']);
 export type MatchPhase = z.infer<typeof MatchPhaseSchema>;
 export const GestureNameSchema = z.enum(gestureNames);
 
@@ -82,7 +82,7 @@ export const WebRtcPayloadSchema = z.object({
 export type WebRtcPayload = z.infer<typeof WebRtcPayloadSchema>;
 
 export const CommandTypeSchema = z.enum([
-  'match.start', 'match.countdownCompleted', 'match.reset',
+  'match.start', 'match.beginCountdown', 'match.countdownCompleted', 'match.reset',
   'challenge.succeeded', 'challenge.timedOut', 'resolution.complete', 'cinematic.completed'
 ]);
 export type CommandType = z.infer<typeof CommandTypeSchema>;

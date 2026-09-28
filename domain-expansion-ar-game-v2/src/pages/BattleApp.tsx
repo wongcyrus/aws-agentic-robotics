@@ -50,13 +50,14 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const completedCinematic = useRef<string | null>(null);
   const completedCastVideos = useRef(new Set<string>());
   const introducedMatches = useRef(new Set<string>());
-  const completedIntroductions = useRef(new Set<string>());
+  const currentState = useRef(state);
   const narratedResolutions = useRef(new Set<string>());
   const narratedResults = useRef(new Set<string>());
   const criticalMarks = useRef(new Set<string>());
   const lastPeriodicCommentary = useRef(0);
   const commentaryInFlight = useRef(false);
   const commentaryBusyUntil = useRef(0);
+  currentState.current = state;
   const api = useMemo(
     () => config?.apiBaseUrl ? new ApiClient(config.apiBaseUrl, new LocalStorageTokenProvider()) : null,
     [config]
@@ -153,34 +154,33 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   };
 
   useEffect(() => {
-    if (state?.phase !== 'countdown' || !state.matchId || introducedMatches.current.has(state.matchId)) return;
-    introducedMatches.current.add(state.matchId);
+    if (state?.phase !== 'preparing' || !state.matchId || introducedMatches.current.has(state.matchId)) return;
+    const matchId = state.matchId;
+    introducedMatches.current.add(matchId);
     if (!api || !settings.commentatorEnabled) {
-      completedIntroductions.current.add(state.matchId);
+      command('match.beginCountdown');
       return;
     }
     void (async () => {
       try {
-        await api.registerRoom(state.matchId!, settings.roomCode, config?.webSocketUrl ?? '');
+        await api.registerRoom(matchId, settings.roomCode, config?.webSocketUrl ?? '');
         if (state.config.captureSnapshots) await delay(1200);
         await requestCommentary('/api/live-status', { eventType: 'RESET', isReset: true });
-        await Promise.race([
-          commentaryPlayer.current.waitForPlayback(),
-          delay(30_000)
-        ]);
+        await commentaryPlayer.current.waitForPlayback();
       } catch (error) {
         console.warn('Match introduction setup failed', error);
         setCommentaryError(error instanceof Error ? error.message : 'Match introduction failed');
       } finally {
-        completedIntroductions.current.add(state.matchId!);
+        if (currentState.current?.matchId === matchId && currentState.current.phase === 'preparing') {
+          command('match.beginCountdown');
+        }
       }
     })();
-  }, [api, config?.webSocketUrl, settings.commentatorEnabled, settings.roomCode, state?.matchId, state?.phase]);
+  }, [api, command, config?.webSocketUrl, settings.commentatorEnabled, settings.roomCode, state?.matchId, state?.phase]);
 
   useEffect(() => {
     if (state?.phase === 'countdown' && state.matchId && state.countdownEndsAt &&
-      now >= state.countdownEndsAt && completedIntroductions.current.has(state.matchId) &&
-      completedCountdown.current !== state.matchId) {
+      now >= state.countdownEndsAt && completedCountdown.current !== state.matchId) {
       completedCountdown.current = state.matchId;
       command('match.countdownCompleted');
     }
@@ -266,7 +266,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     const technique = player?.challenge?.technique;
     const statusLabel = technique ?? (
       !state || state.phase === 'idle' ? text.waitingBattle :
-      state.phase === 'countdown' ? text.getReady :
+      state.phase === 'preparing' || state.phase === 'countdown' ? text.getReady :
       state.phase === 'resolving' ? text.scoreLocked :
       state.phase === 'cinematic' ? text.techniqueActivated :
       state.phase === 'ended' ? text.battleComplete :

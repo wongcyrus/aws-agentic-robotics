@@ -295,7 +295,7 @@ describe('BattleApp', () => {
     expect(command).toHaveBeenCalledWith('cinematic.completed', { cinematicId: 'cin-1' });
   });
 
-  it('waits for opening commentary playback before completing the countdown', async () => {
+  it('waits for opening commentary playback before starting the countdown', async () => {
     let openingUtterance: { onend?: () => void } | undefined;
     vi.stubGlobal('speechSynthesis', {
       getVoices: vi.fn(() => [{ name: 'Gojo' }]),
@@ -307,17 +307,43 @@ describe('BattleApp', () => {
     api.registerRoom.mockResolvedValue(undefined);
     api.commentary.mockResolvedValue({ commentary: 'Prepare to expand your domains.' });
     gameState = makeState({
-      phase: 'countdown',
-      countdownEndsAt: Date.now() - 1,
+      phase: 'preparing',
+      countdownEndsAt: null,
       config: { ...makeState().config, captureSnapshots: false }
     });
     const { BattleApp } = await import('../pages/BattleApp');
     render(<BattleApp initialSettings={{ language: 'en' }} />);
     await waitFor(() => expect(openingUtterance).toBeDefined());
     await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(command).not.toHaveBeenCalledWith('match.countdownCompleted');
+    expect(command).not.toHaveBeenCalledWith('match.beginCountdown');
     openingUtterance?.onend?.();
-    await waitFor(() => expect(command).toHaveBeenCalledWith('match.countdownCompleted'));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('match.beginCountdown'));
+  });
+
+  it('does not let a stale introduction start a replacement match', async () => {
+    let openingUtterance: { onend?: () => void } | undefined;
+    vi.stubGlobal('speechSynthesis', {
+      getVoices: vi.fn(() => [{ name: 'Gojo' }]),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      cancel: vi.fn(),
+      speak: vi.fn((utterance) => { openingUtterance = utterance; })
+    });
+    api.registerRoom.mockResolvedValue(undefined);
+    api.commentary.mockResolvedValue({ commentary: 'Prepare to expand your domains.' });
+    gameState = makeState({
+      phase: 'preparing',
+      countdownEndsAt: null,
+      config: { ...makeState().config, captureSnapshots: false }
+    });
+    const { BattleApp } = await import('../pages/BattleApp');
+    const view = render(<BattleApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(openingUtterance).toBeDefined());
+    gameState = makeState({ matchId: null, phase: 'idle', countdownEndsAt: null });
+    view.rerender(<BattleApp initialSettings={{ language: 'en' }} />);
+    openingUtterance?.onend?.();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(command).not.toHaveBeenCalledWith('match.beginCountdown');
   });
 
   it('shows results, skips video, and requests battle commentary', async () => {

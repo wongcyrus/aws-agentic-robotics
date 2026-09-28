@@ -198,7 +198,7 @@ test('flicker, duplicate frames, and camera restart stay idempotent', async ({ b
   await expect(value.viewer.locator('.fighter.player1 .fighter-info strong')).toHaveText('0');
   await clearGestureQueue(value.player1);
   await value.player1.getByRole('button', { name: 'Start camera' }).click();
-  await expect(value.player1.locator('.player-header')).toContainText('Camera + MediaPipe active');
+  await expect(value.player1.locator('.settings-card .status-message')).toContainText('Camera + MediaPipe active');
   await queueGesture(value.player1, p1Target);
   await waitForFrames(value.player1);
   await expect(value.viewer.locator('.fighter.player1 .fighter-info strong')).toHaveText('1');

@@ -231,6 +231,7 @@ describe('deterministic React gameplay simulation', () => {
       player2: [['Reversal Red']]
     });
     lateRoom.command('viewer', 'match.start', { config });
+    lateRoom.command('viewer', 'match.beginCountdown');
     vi.setSystemTime(Date.now() + 1000);
     lateRoom.command('viewer', 'match.countdownCompleted');
     const p2Challenge = lateRoom.state!.players.player2.challenge!;
@@ -266,6 +267,7 @@ describe('deterministic React gameplay simulation', () => {
   ] as const)('handles recognition %s the deadline', async (_label, offset, expectedScore) => {
     const { PlayerApp } = await import('../pages/PlayerApp');
     act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
+    act(() => coordinator.command('viewer', 'match.beginCountdown'));
     act(() => coordinator.command('viewer', 'match.countdownCompleted'));
     render(<PlayerApp initialSettings={playerSettings('player1')} />);
     fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
@@ -283,6 +285,7 @@ describe('deterministic React gameplay simulation', () => {
   it('turns flicker and a timeout/recognition same tick into one terminal outcome', async () => {
     const { PlayerApp } = await import('../pages/PlayerApp');
     act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
+    act(() => coordinator.command('viewer', 'match.beginCountdown'));
     act(() => coordinator.command('viewer', 'match.countdownCompleted'));
     render(<PlayerApp initialSettings={playerSettings('player1')} />);
     fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
@@ -314,6 +317,7 @@ describe('deterministic React gameplay simulation', () => {
     const { PlayerApp } = await import('../pages/PlayerApp');
     const { BattleApp } = await import('../pages/BattleApp');
     act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
+    act(() => coordinator.command('viewer', 'match.beginCountdown'));
     act(() => coordinator.command('viewer', 'match.countdownCompleted'));
     const player = render(<PlayerApp initialSettings={playerSettings('player1')} />);
     expect(screen.getByText('Lapse Blue')).toBeTruthy();
@@ -377,6 +381,7 @@ describe('seeded authoritative match invariants', () => {
         player2: [['Reversal Red'], ['Lapse Blue'], ['Reversal Red']]
       });
       room.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0, challengeCount: 3 } });
+      room.command('viewer', 'match.beginCountdown');
       room.command('viewer', 'match.countdownCompleted');
       for (let round = 0; round < 3; round += 1) {
         const roles = random() < .5

@@ -70,6 +70,31 @@ def test_direct_bedrock_fallback_builds_multimodal_request(monkeypatch):
     assert result == "generated"
 
 
+def test_direct_bedrock_fallback_retries_truncated_output(monkeypatch):
+    calls = []
+
+    def converse(**kwargs):
+        calls.append(kwargs["inferenceConfig"]["maxTokens"])
+        if len(calls) == 1:
+            return {
+                "stopReason": "max_tokens",
+                "output": {"message": {"content": [{"text": "truncated P2"}]}},
+            }
+        return {
+            "stopReason": "end_turn",
+            "output": {"message": {"content": [{"text": "complete commentary"}]}},
+        }
+
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(converse=converse),
+    )
+
+    assert commentary.direct_bedrock_fallback("prompt") == "complete commentary"
+    assert calls == [400, 800]
+
+
 def test_direct_bedrock_fallback_returns_stable_message_on_failure(monkeypatch):
     monkeypatch.setattr(
         commentary.boto3, "client", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("down"))

@@ -6,6 +6,8 @@ This backend is isolated from the V1 Domain Expansion deployment. It provides:
 - A WebSocket coordinator using protocol version `2.0`.
 - DynamoDB-backed room state, connection state, revisions, and command idempotency.
 - Deadline-based challenges and reconnect-safe room snapshots.
+- An authoritative preparation phase that gates the countdown on completed
+  opening commentary playback from the viewer that started the match.
 - A score-grace resolution phase for near-simultaneous player successes.
 
 V2 does not implement the V1 `BroadcastChannel` cross-tab coordinator. Localhost

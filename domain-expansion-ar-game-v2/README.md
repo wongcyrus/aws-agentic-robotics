@@ -28,6 +28,12 @@ The WebSocket wire format is protocol `2.0`: the client joins with
 `{action:"signal",roomId,to?,signalType,payload}`. Server events are validated
 envelopes, including `room.snapshot` and `webrtc.*`.
 
+Starting a match enters the authoritative `preparing` phase while START
+snapshots and opening commentary are produced. The viewer that issued
+`match.start` may send `match.beginCountdown` only after opening TTS playback
+finishes; the countdown deadline is created at that point, so gameplay cannot
+start underneath the introduction.
+
 ## Local development
 
 ```bash

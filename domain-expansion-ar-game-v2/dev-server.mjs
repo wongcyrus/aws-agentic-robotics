@@ -250,14 +250,19 @@ const generateCommentary = async (body, path) => {
     { image: { format, source: { bytes } } }
   ]);
   content.push({ text: buildCommentaryPrompt(body, path) });
-  const result = await bedrock.send(new ConverseCommand({
+  const invoke = (maxTokens) => bedrock.send(new ConverseCommand({
     modelId: bedrockModelId,
     system: [{
       text: 'You are Kugisaki Nobara acting as a confident, fashionable Jujutsu Kaisen battle commentator. Be punchy, dramatic, and specific to the supplied event. Never include analysis, labels, or preamble.'
     }],
     messages: [{ role: 'user', content }],
-    inferenceConfig: { maxTokens: 400 }
+    inferenceConfig: { maxTokens }
   }));
+  let result = await invoke(400);
+  if (result.stopReason === 'max_tokens') {
+    console.warn('Bedrock commentary reached 400 output tokens; retrying with 800.');
+    result = await invoke(800);
+  }
   const commentary = result.output?.message?.content
     ?.find((block) => typeof block.text === 'string')
     ?.text?.trim();
@@ -388,6 +393,7 @@ const newState = (roomId) => ({
   },
   players: { player1: emptyPlayer(), player2: emptyPlayer() },
   challengeLists: { player1: [], player2: [] },
+  controllerClientId: null,
   countdownEndsAt: null, resolution: null, cinematic: null, winner: null, pendingWinner: null,
   processedCommands: new Set(), updatedAt: Date.now()
 });
@@ -398,7 +404,7 @@ const roomState = (roomId) => {
 const send = (client, message) => client.ws.readyState === 1 && client.ws.send(JSON.stringify(message));
 const roomClients = (roomId) => [...clients.values()].filter((client) => client.roomId === roomId);
 const publicState = (state) => {
-  const { challengeLists, processedCommands, ...result } = state;
+  const { challengeLists, controllerClientId, processedCommands, ...result } = state;
   return result;
 };
 const envelope = (state, messageType, payload, correlationId) => ({
@@ -487,7 +493,7 @@ wss.on('connection', (ws) => {
       state.revision = revision;
       state.players.player1 = { ...emptyPlayer(), ...currentConnections.player1 };
       state.players.player2 = { ...emptyPlayer(), ...currentConnections.player2 };
-      state.matchId = id('match'); state.phase = 'countdown';
+      state.matchId = id('match'); state.phase = 'preparing'; state.controllerClientId = client.clientId;
       state.config = {
         difficultySeconds: Math.max(1, Math.min(120, Number(config.difficultySeconds) || 8)),
         challengeCount: Math.max(1, Math.min(100, Number(config.challengeCount) || 11)),
@@ -499,8 +505,13 @@ wss.on('connection', (ws) => {
       const shared = Array.from({ length: Math.ceil(state.config.challengeCount / techniques.length) }, shuffle).flat().slice(0, state.config.challengeCount);
       state.challengeLists.player1 = shared;
       state.challengeLists.player2 = state.config.synchronizedGestures ? [...shared] : Array.from({ length: Math.ceil(state.config.challengeCount / techniques.length) }, shuffle).flat().slice(0, state.config.challengeCount);
+      state.countdownEndsAt = null;
+    } else if (command.messageType === 'match.beginCountdown' && client.role === 'viewer' &&
+      state.phase === 'preparing' && state.controllerClientId === client.clientId) {
+      state.phase = 'countdown';
       state.countdownEndsAt = Date.now() + state.config.countdownSeconds * 1000;
-    } else if (command.messageType === 'match.countdownCompleted' && state.phase === 'countdown' && Date.now() >= state.countdownEndsAt) {
+    } else if (command.messageType === 'match.countdownCompleted' && client.role === 'viewer' &&
+      state.controllerClientId === client.clientId && state.phase === 'countdown' && Date.now() >= state.countdownEndsAt) {
       state.phase = 'playing'; state.countdownEndsAt = null; assignChallenge(state, 'player1'); assignChallenge(state, 'player2');
     } else if (command.messageType === 'challenge.succeeded' && (client.role === 'player1' || client.role === 'player2') && (state.phase === 'playing' || state.phase === 'resolving')) {
       const player = state.players[client.role];

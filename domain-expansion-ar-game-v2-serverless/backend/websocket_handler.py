@@ -93,6 +93,7 @@ def _default_state(room_id: str, now_ms: int) -> dict[str, Any]:
             "player2": _default_player(),
         },
         "challengeLists": {"player1": [], "player2": []},
+        "controllerClientId": None,
         "countdownEndsAt": None,
         "resolution": None,
         "cinematic": None,
@@ -109,6 +110,7 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
     result.pop("session_id", None)
     result.pop("entityType", None)
     result.pop("challengeLists", None)
+    result.pop("controllerClientId", None)
     result.pop("processedCommands", None)
     result.pop("ttl", None)
     return result
@@ -203,11 +205,13 @@ def _apply_command(
     command_type: str,
     payload: dict[str, Any],
     role: str,
+    client_id: str,
     now_ms: int,
     rng: random.Random,
 ) -> None:
     viewer_commands = {
         "match.start",
+        "match.beginCountdown",
         "match.countdownCompleted",
         "match.reset",
         "resolution.complete",
@@ -227,7 +231,8 @@ def _apply_command(
         capture_snapshots = bool(requested.get("captureSnapshots", True))
 
         state["matchId"] = _new_id("match")
-        state["phase"] = "countdown"
+        state["phase"] = "preparing"
+        state["controllerClientId"] = client_id
         state["config"] = {
             "difficultySeconds": difficulty,
             "challengeCount": count,
@@ -252,11 +257,21 @@ def _apply_command(
         state["challengeLists"]["player2"] = (
             shared.copy() if synchronized else _shuffle_techniques(count, rng)
         )
-        state["countdownEndsAt"] = now_ms + countdown * 1000
+        state["countdownEndsAt"] = None
+        return
+
+    if command_type == "match.beginCountdown":
+        _require_phase(state, "preparing")
+        if state.get("controllerClientId") != client_id:
+            raise _command_error("Only the viewer that started the match can begin the countdown")
+        state["phase"] = "countdown"
+        state["countdownEndsAt"] = now_ms + state["config"]["countdownSeconds"] * 1000
         return
 
     if command_type == "match.countdownCompleted":
         _require_phase(state, "countdown")
+        if state.get("controllerClientId") != client_id:
+            raise _command_error("Only the viewer that started the match can complete the countdown")
         if now_ms < int(state.get("countdownEndsAt") or 0):
             raise _command_error("Countdown has not completed")
         state["phase"] = "playing"
@@ -616,6 +631,7 @@ def handle_websocket_event(
                 command_type,
                 payload,
                 str(sender.get("role")),
+                str(sender.get("client_id")),
                 command_time_ms,
                 randomizer,
             )

@@ -436,7 +436,7 @@ export async function openRole(
   await page.goto(role === 'viewer'
     ? `/battle.html?room=${room}`
     : `/?room=${room}&role=${role}`);
-  await expect(page.locator(role === 'viewer' ? '.battle-header' : '.player-header'))
+  await expect(page.locator(role === 'viewer' ? '.battle-header' : '.settings-card .status-message'))
     .toContainText('connected');
   await expectAuthoritativeRoom(page, room, {
     phase: expectedPhase,
@@ -475,14 +475,14 @@ export async function openArena(
   });
 
   await player1.goto(`/?room=${room}&role=player1`);
-  await expect(player1.locator('.player-header')).toContainText('connected');
+  await expect(player1.locator('.settings-card .status-message')).toContainText('connected');
   await expectAuthoritativeRoom(viewer, room, {
     player1Connected: true,
     label: 'viewer did not observe Player 1 joining'
   });
 
   await player2.goto(`/?room=${room}&role=player2`);
-  await expect(player2.locator('.player-header')).toContainText('connected');
+  await expect(player2.locator('.settings-card .status-message')).toContainText('connected');
   await expectAuthoritativeRoom(viewer, room, {
     player1Connected: true,
     player2Connected: true,
@@ -506,12 +506,12 @@ export async function openArena(
 
 export async function startCameras(arena: Arena) {
   await Promise.all([
-    arena.player1.getByRole('button', { name: 'Start camera' }).click(),
-    arena.player2.getByRole('button', { name: 'Start camera' }).click()
+    expect(arena.player1.getByRole('button', { name: 'Stop camera' })).toBeVisible(),
+    expect(arena.player2.getByRole('button', { name: 'Stop camera' })).toBeVisible()
   ]);
   await Promise.all([
-    expect(arena.player1.locator('.player-header')).toContainText('Camera + MediaPipe active'),
-    expect(arena.player2.locator('.player-header')).toContainText('Camera + MediaPipe active')
+    expect(arena.player1.locator('.settings-card .status-message')).toContainText('Camera + MediaPipe active'),
+    expect(arena.player2.locator('.settings-card .status-message')).toContainText('Camera + MediaPipe active')
   ]);
 }
 

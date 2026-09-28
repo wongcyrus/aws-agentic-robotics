@@ -73,7 +73,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     if (gesture) return gesture;
     if (settings.playerMode === 'solo') return solo.active ? text.prepareNext : text.startSoloRound;
     if (!state || state.phase === 'idle') return text.waitingBattle;
-    if (state.phase === 'countdown') return text.getReady;
+    if (state.phase === 'preparing' || state.phase === 'countdown') return text.getReady;
     if (state.phase === 'resolving') return text.scoreLocked;
     if (state.phase === 'cinematic') return text.techniqueActivated;
     if (state.phase === 'ended') return text.battleComplete;
@@ -286,7 +286,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
 
   useEffect(() => {
     if (!state?.matchId || !canvasRef.current || !cameraRef.current || !api || !state.config.captureSnapshots) return;
-    const phase = state.phase === 'countdown' ? 'START' : state.phase === 'ended' ? 'END' : null;
+    const phase = state.phase === 'preparing' ? 'START' : state.phase === 'ended' ? 'END' : null;
     const captureKey = phase ? `${state.matchId}:${phase}` : null;
     if (!phase || capturedPhase.current === captureKey || capturingPhase.current === captureKey) return;
     const matchId = state.matchId;

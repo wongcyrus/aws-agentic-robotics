@@ -137,13 +137,13 @@ def invoke_route(
     )
 
 
-def join(role, connection_id, connections, sessions, api):
+def join(role, connection_id, connections, sessions, api, *, client_id=None):
     response = invoke(
         {
             "action": "join",
             "roomId": "ROOM",
             "role": role,
-            "clientId": f"{role}-client",
+            "clientId": client_id or f"{role}-client",
         },
         connection_id,
         connections,
@@ -217,6 +217,17 @@ def start_playing(
     assert response["statusCode"] == 200
     match_id = sessions.items["v2-room:ROOM"]["matchId"]
     response = command(
+        "match.beginCountdown",
+        {},
+        "viewer",
+        connections,
+        sessions,
+        api,
+        message_id="begin-countdown",
+        match_id=match_id,
+    )
+    assert response["statusCode"] == 200
+    response = command(
         "match.countdownCompleted",
         {},
         "viewer",
@@ -259,8 +270,21 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
     assert response["statusCode"] == 200
     state = sessions.items["v2-room:ROOM"]
     match_id = state["matchId"]
-    assert state["phase"] == "countdown"
+    assert state["phase"] == "preparing"
     assert state["config"]["captureSnapshots"] is False
+
+    response = command(
+        "match.beginCountdown",
+        {},
+        "viewer",
+        connections,
+        sessions,
+        api,
+        message_id="begin-countdown",
+        match_id=match_id,
+    )
+    assert response["statusCode"] == 200
+    assert sessions.items["v2-room:ROOM"]["phase"] == "countdown"
 
     response = command(
         "match.countdownCompleted",
@@ -328,10 +352,23 @@ def test_reconnect_does_not_reset_match():
     )
     match_id = sessions.items["v2-room:ROOM"]["matchId"]
 
-    join("viewer", "viewer-two", connections, sessions, api)
+    join("viewer", "viewer-two", connections, sessions, api, client_id="viewer-two-client")
     state = sessions.items["v2-room:ROOM"]
     assert state["matchId"] == match_id
-    assert state["phase"] == "countdown"
+    assert state["phase"] == "preparing"
+
+    response = command(
+        "match.beginCountdown",
+        {},
+        "viewer-two",
+        connections,
+        sessions,
+        api,
+        message_id="wrong-viewer-begin",
+        match_id=match_id,
+    )
+    assert response["statusCode"] == 400
+    assert sessions.items["v2-room:ROOM"]["phase"] == "preparing"
 
 
 def test_state_helpers_normalize_public_data_and_winner_bounds():
