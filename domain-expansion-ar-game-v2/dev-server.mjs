@@ -11,7 +11,7 @@ import { WebSocketServer } from 'ws';
 const port = Number(process.env.PORT || 5173);
 const e2eTestMode = process.env.E2E_TEST_MODE === '1';
 const bedrockRegion = process.env.BEDROCK_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
-const bedrockModelId = process.env.BEDROCK_MODEL_ID || 'global.amazon.nova-2-lite-v1:0';
+const bedrockModelId = process.env.BEDROCK_MODEL_ID || 'global.moonshotai.kimi-k3';
 const commentaryMaxTokens = Number(process.env.COMMENTARY_MAX_TOKENS || (bedrockModelId.includes('kimi') ? 1600 : 400));
 const pollyRegion = process.env.POLLY_REGION || bedrockRegion;
 const bedrock = new BedrockRuntimeClient({

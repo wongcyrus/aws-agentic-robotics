@@ -12,7 +12,7 @@ DEFAULT_AGENT_TYPE = os.environ.get("AGENT_TYPE", "agentcore_runtime")
 OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
 OPENCLAW_AGENT_ID = os.environ.get("OPENCLAW_AGENT_ID", "domain-commentator")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
 COMMENTARY_MAX_TOKENS = int(
     os.environ.get(
