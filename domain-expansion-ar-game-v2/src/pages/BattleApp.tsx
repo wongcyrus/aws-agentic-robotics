@@ -41,6 +41,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const [showSettings, setShowSettings] = useState(true);
   const [live2dSpeaking, setLive2dSpeaking] = useState(false);
   const [live2dAudio, setLive2dAudio] = useState<HTMLAudioElement>();
+  const [openingCommentaryReadyMatchId, setOpeningCommentaryReadyMatchId] = useState<string | null>(null);
   const peers = useRef<WebRtcSessionService | undefined>(undefined);
   const commentaryPlayer = useRef(new CommentaryPlayer(setLive2dSpeaking, setLive2dAudio));
   const requestedPlayers = useRef(new Set<string>());
@@ -111,7 +112,8 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
 
   const requestCommentary = async (
     path: '/api/live-status' | '/api/battle-result',
-    extra: Record<string, unknown>
+    extra: Record<string, unknown>,
+    beforePlayback?: () => Promise<void> | void
   ) => {
     if (!api || !settings.commentatorEnabled) return;
     const isPriority = path === '/api/battle-result' || extra.eventType === 'RESET';
@@ -125,6 +127,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         commentaryBusyUntil.current = Date.now() + Math.max(4500, text.length * 65);
       }
       setCommentaryError(response.ttsError ?? '');
+      await beforePlayback?.();
       await commentaryPlayer.current.play(response, settings);
     } catch (error) {
       console.warn('Commentary request failed', error);
@@ -163,12 +166,16 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     void (async () => {
       try {
         await api.registerRoom(matchId, settings.roomCode, config?.webSocketUrl ?? '');
-        await requestCommentary('/api/live-status', { eventType: 'RESET', isReset: true });
+        await requestCommentary('/api/live-status', { eventType: 'RESET', isReset: true }, async () => {
+          setOpeningCommentaryReadyMatchId(matchId);
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        });
         await commentaryPlayer.current.waitForPlayback();
       } catch (error) {
         console.warn('Match introduction setup failed', error);
         setCommentaryError(error instanceof Error ? error.message : 'Match introduction failed');
       } finally {
+        setOpeningCommentaryReadyMatchId(matchId);
         if (currentState.current?.matchId === matchId && currentState.current.phase === 'preparing') {
           command('match.beginCountdown');
         }
@@ -283,6 +290,9 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const winnerSlug = state?.winner === 'PLAYER 1' ? 'player1' : state?.winner === 'PLAYER 2' ? 'player2' : 'draw';
   const matchActive = Boolean(state && !['idle', 'ended'].includes(state.phase));
   const countdown = state?.phase === 'countdown' ? remainingSeconds(state.countdownEndsAt, now) : 0;
+  const openingCommentaryLoading = state?.phase === 'preparing' &&
+    settings.commentatorEnabled &&
+    openingCommentaryReadyMatchId !== state.matchId;
   const p1Score = state?.players.player1.score ?? 0;
   const p2Score = state?.players.player2.score ?? 0;
   const scoreTotal = Math.max(1, p1Score + p2Score);
@@ -309,14 +319,14 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     <section className="commentary" style={{ '--avatar-size': `${settings.avatarSize}px` } as React.CSSProperties}>
       <img src="/static/img/commentator_avatar.png" alt={text.aiCommentator} />
       <div><p>{settings.commentatorEnabled
-        ? state?.phase === 'preparing' ? text.preparingCommentary : commentary
+        ? openingCommentaryLoading ? text.preparingCommentary : commentary
         : text.commentatorDisabled}</p>{commentaryError && <small>{commentaryError}</small>}</div>
     </section>
     <button className="panel-toggle battle-panel-toggle" onClick={() => setShowSettings((visible) => !visible)}>
       {showSettings ? text.hideSettings : text.matchSettings}
     </button>
     <button className="primary battle-start" onClick={start}>{matchActive ? text.stopReset : text.startBattle}</button>
-    {state?.phase === 'preparing' && <section className="preparing-overlay" role="status" aria-live="polite">
+    {openingCommentaryLoading && <section className="preparing-overlay" role="status" aria-live="polite">
       <div className="loading-spinner" />
       <strong>{text.preparingCommentary}</strong>
     </section>}

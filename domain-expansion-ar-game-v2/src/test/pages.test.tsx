@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultSettings } from '../services/settings';
 import type { MatchState } from '../core/protocol';
@@ -297,6 +297,7 @@ describe('BattleApp', () => {
 
   it('waits for opening commentary playback before starting the countdown', async () => {
     let openingUtterance: { onend?: () => void } | undefined;
+    let resolveCommentary: (response: { commentary: string }) => void = () => undefined;
     vi.stubGlobal('speechSynthesis', {
       getVoices: vi.fn(() => [{ name: 'Gojo' }]),
       addEventListener: vi.fn(),
@@ -305,7 +306,9 @@ describe('BattleApp', () => {
       speak: vi.fn((utterance) => { openingUtterance = utterance; })
     });
     api.registerRoom.mockResolvedValue(undefined);
-    api.commentary.mockResolvedValue({ commentary: 'Prepare to expand your domains.' });
+    api.commentary.mockReturnValue(new Promise((resolve) => {
+      resolveCommentary = resolve;
+    }));
     gameState = makeState({
       phase: 'preparing',
       countdownEndsAt: null,
@@ -314,7 +317,12 @@ describe('BattleApp', () => {
     const { BattleApp } = await import('../pages/BattleApp');
     render(<BattleApp initialSettings={{ language: 'en' }} />);
     expect(screen.getByRole('status').textContent).toContain('NOW LOADING OPENING COMMENTARY');
+    await act(async () => {
+      resolveCommentary({ commentary: 'Prepare to expand your domains.' });
+    });
     await waitFor(() => expect(openingUtterance).toBeDefined());
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('Prepare to expand your domains.')).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(command).not.toHaveBeenCalledWith('match.beginCountdown');
     openingUtterance?.onend?.();
