@@ -106,7 +106,7 @@ async function advance(milliseconds: number) {
 }
 
 async function startCameras() {
-  screen.getAllByRole('button', { name: 'Start camera' }).forEach((button) => fireEvent.click(button));
+  screen.queryAllByRole('button', { name: 'Start camera' }).forEach((button) => fireEvent.click(button));
   await flush();
   expect(ScriptedCamera.instances.filter(({ active }) => active)).toHaveLength(2);
 }

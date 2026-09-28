@@ -43,6 +43,8 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const videoRef = useRef<HTMLVideoElement>(null), canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | undefined>(undefined), popupRef = useRef<Window | null>(null), webrtcRef = useRef<WebRtcSessionService | undefined>(undefined);
   const cameraRef = useRef<MediaPipeCameraAdapter | null>(null);
+  const cameraStarting = useRef(false);
+  const autoStartedCamera = useRef(false);
   const lastRobotActionAt = useRef(0);
   const pendingPopupMedia = useRef<string | null>(null);
   const [cameraStatus, setCameraStatus] = useState(text.cameraStopped);
@@ -83,9 +85,11 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   );
 
   const refreshCameras = async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) return;
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    setCameras(devices.filter(({ kind }) => kind === 'videoinput'));
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices() ?? [];
+    const videoDevices = devices.filter(({ kind }) => kind === 'videoinput');
+    setCameras(videoDevices);
+    return videoDevices;
   };
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 200);
@@ -111,18 +115,31 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     };
   }, [settings.role, signal, subscribe]);
 
-  const startCamera = async () => {
+  const startCamera = async (requestedCameraId = settings.cameraId) => {
     const video = videoRef.current, canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    if (!video || !canvas || cameraStarting.current) return;
+    cameraStarting.current = true;
     const recognizer = new StableGestureRecognizer(), vfx = new CanvasVfxAdapter(), camera = new MediaPipeCameraAdapter();
     try {
       cameraRef.current?.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = undefined;
       await vfx.initialize();
-      await camera.start(video, settings.cameraId, (image, hands) => {
+      const onFrame = (image: CanvasImageSource, hands: Parameters<StableGestureRecognizer['update']>[0]) => {
         const stable = recognizer.update(hands);
         setDetected(stable);
         vfx.draw(canvas, image, hands, stable);
-      });
+      };
+      try {
+        await camera.start(video, requestedCameraId, onFrame);
+      } catch (error) {
+        const unavailableSelection = requestedCameraId !== 'default' &&
+          error instanceof DOMException &&
+          ['NotFoundError', 'OverconstrainedError'].includes(error.name);
+        if (!unavailableSelection) throw error;
+        await camera.start(video, 'default', onFrame);
+        setSettings((current) => ({ ...current, cameraId: 'default' }));
+      }
       cameraRef.current = camera;
       streamRef.current = canvas.captureStream(30);
       setCameraActive(true);
@@ -130,9 +147,12 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       await refreshCameras();
       webrtcRef.current?.playerReady();
     } catch (error) {
+      camera.stop();
       console.error('Camera startup failed', error);
       setCameraActive(false);
       setCameraStatus(error instanceof Error ? error.message : text.cameraFailed);
+    } finally {
+      cameraStarting.current = false;
     }
   };
   const stopCamera = () => {
@@ -143,6 +163,27 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     setCameraActive(false);
     setCameraStatus(text.cameraStopped);
   };
+  useEffect(() => {
+    if (autoStartedCamera.current) return;
+    autoStartedCamera.current = true;
+    void startCamera();
+  }, []);
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return;
+    const handleDeviceChange = async () => {
+      try {
+        const available = await refreshCameras();
+        if (settings.cameraId === 'default' || available.some(({ deviceId }) => deviceId === settings.cameraId)) return;
+        setSettings((current) => ({ ...current, cameraId: 'default' }));
+        if (cameraActive) await startCamera('default');
+      } catch (error) {
+        console.warn('Unable to refresh cameras after device change', error);
+      }
+    };
+    mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+  }, [cameraActive, settings.cameraId]);
   useEffect(() => stopCamera, []);
 
   const triggerRobot = (gesture: GestureName) => {
@@ -323,7 +364,11 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
         </>}
       <details>
         <summary>{text.playerSettings}</summary>
-        <label>{text.camera}<select value={settings.cameraId} onChange={(event) => setSettings({ ...settings, cameraId: event.target.value })}><option value="default">{text.defaultCamera}</option>{cameras.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `${text.camera} ${index + 1}`}</option>)}</select></label>
+        <label>{text.camera}<select value={settings.cameraId} onChange={(event) => {
+          const cameraId = event.target.value;
+          setSettings({ ...settings, cameraId });
+          if (cameraActive) void startCamera(cameraId);
+        }}><option value="default">{text.defaultCamera}</option>{cameras.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `${text.camera} ${index + 1}`}</option>)}</select></label>
         <label>{text.language}<select value={settings.language} onChange={(event) => setSettings({ ...settings, language: event.target.value as typeof settings.language })}><option value="zh-HK">廣東話</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option></select></label>
         <label>{text.video}<select value={settings.videoMode} onChange={(event) => setSettings({ ...settings, videoMode: event.target.value as typeof settings.videoMode })}><option value="integrated">{text.integratedSound}</option><option value="integrated_silent">{text.integratedSilent}</option><option value="popup">{text.popupTab}</option><option value="none">{text.noVideo}</option></select></label>
         <label><input type="checkbox" checked={settings.autoOpenPopup} onChange={(event) => setSettings({ ...settings, autoOpenPopup: event.target.checked })} /> {text.autoOpenPopup}</label>

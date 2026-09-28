@@ -154,13 +154,12 @@ describe('MediaApp', () => {
 });
 
 describe('PlayerApp', () => {
-  it('renders online state, edits settings, starts and stops the camera', async () => {
+  it('renders online state, edits settings, auto-starts and stops the camera', async () => {
     gameState = makeState();
     const { PlayerApp } = await import('../pages/PlayerApp');
     render(<PlayerApp initialSettings={{ language: 'en' }} />);
     expect(screen.getByText('Lapse Blue')).toBeTruthy();
     expect(screen.getByText(/Score 1\/3/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
     expect(playerReady).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Stop camera' }));
@@ -169,6 +168,33 @@ describe('PlayerApp', () => {
     expect(screen.getByDisplayValue('ABCD')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'player2' } });
     expect(screen.getByDisplayValue('PLAYER 2')).toBeTruthy();
+  });
+
+  it('lists cameras and switches the active camera immediately', async () => {
+    const mediaListeners = new Map<string, EventListener>();
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: 'videoinput', deviceId: 'camera-1', label: 'Front camera' },
+          { kind: 'videoinput', deviceId: 'camera-2', label: 'USB camera' }
+        ]),
+        addEventListener: vi.fn((type: string, listener: EventListener) => mediaListeners.set(type, listener)),
+        removeEventListener: vi.fn((type: string) => mediaListeners.delete(type))
+      }
+    });
+    const { PlayerApp } = await import('../pages/PlayerApp');
+    render(<PlayerApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(cameraStart).toHaveBeenCalled());
+    const cameraSelect = await screen.findByLabelText('Camera');
+    await waitFor(() => expect(screen.getByRole('option', { name: 'USB camera' })).toBeTruthy());
+    fireEvent.change(cameraSelect, { target: { value: 'camera-2' } });
+    await waitFor(() => expect(cameraStart).toHaveBeenLastCalledWith(
+      expect.any(HTMLVideoElement),
+      'camera-2',
+      expect.any(Function)
+    ));
+    expect(mediaListeners.has('devicechange')).toBe(true);
   });
 
   it('shows phase status instead of the lobby placeholder during a battle', async () => {
@@ -383,11 +409,12 @@ describe('Live2DCommentator', () => {
       live2d: { Live2DModel: { from: vi.fn().mockResolvedValue(model) } }
     };
     const { Live2DCommentator } = await import('../components/Live2DCommentator');
-    const audio = {
+    const audioState = {
       paused: false,
       ended: false,
       currentTime: 1.25
-    } as HTMLAudioElement;
+    };
+    const audio = audioState as HTMLAudioElement;
     const view = render(<Live2DCommentator audioElement={audio} speaking size={350} />);
     await waitFor(() => expect(addChild).toHaveBeenCalledWith(model));
     await waitFor(() => expect(setMouth).toHaveBeenCalled());
@@ -398,7 +425,7 @@ describe('Live2DCommentator', () => {
       .map(([, value]) => value as number);
     await waitFor(() => expect(openValues().at(-1)).toBeGreaterThan(.5));
     const speakingValue = openValues().at(-1) ?? 0;
-    audio.paused = true;
+    audioState.paused = true;
     view.rerender(<Live2DCommentator audioElement={audio} speaking={false} size={350} />);
     await waitFor(() => expect(openValues().at(-1)).toBeLessThan(speakingValue));
     window.dispatchEvent(new MouseEvent('mousemove', { clientX: 12, clientY: 34 }));
