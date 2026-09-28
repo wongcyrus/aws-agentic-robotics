@@ -44,6 +44,10 @@ jobs:
           npm ci --prefix domain-expansion-ar-game
           npm ci --prefix domain-expansion-ar-game-v2
 
+      - name: Install Playwright browser
+        working-directory: domain-expansion-ar-game-v2
+        run: npx playwright install --with-deps chromium
+
       - name: Run static checks
         run: ./scripts/lint.sh
 

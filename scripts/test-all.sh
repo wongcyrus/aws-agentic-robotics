@@ -57,6 +57,7 @@ echo "==> Domain Expansion V2 React"
     cd "${ROOT_DIR}/domain-expansion-ar-game-v2"
     npm test
     npm run build
+    npm run test:e2e:local
     rm -rf coverage
 )
 

@@ -65,7 +65,10 @@ export const defaultSettings: Settings = {
 export function loadSettings(overrides: Partial<Settings> = {}): Settings {
   let stored: unknown = {};
   try { stored = JSON.parse(localStorage.getItem(key) ?? '{}'); } catch { stored = {}; }
-  const result = SettingsSchema.safeParse({ ...defaultSettings, ...(stored as object), ...overrides });
+  const definedOverrides = Object.fromEntries(
+    Object.entries(overrides).filter(([, value]) => value !== undefined)
+  );
+  const result = SettingsSchema.safeParse({ ...defaultSettings, ...(stored as object), ...definedOverrides });
   return result.success ? result.data : defaultSettings;
 }
 export function saveSettings(settings: Settings) { localStorage.setItem(key, JSON.stringify(SettingsSchema.parse(settings))); }

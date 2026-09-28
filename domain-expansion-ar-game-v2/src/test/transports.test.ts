@@ -110,6 +110,8 @@ describe('WebRTC session service', () => {
     const send = vi.fn();
     const onStream = vi.fn();
     const viewer = new WebRtcSessionService('viewer', send, onStream);
+    await viewer.handle('playerReady', {}, 'player', 'player1');
+    expect(send).toHaveBeenCalledWith('viewerRequested', {}, 'player');
     await viewer.handle('iceCandidate', { candidate: 'queued' }, 'player', 'player1');
     const peer = (viewer as unknown as { peers: Map<string, FakePeer> }).peers.get('player')!;
     expect(peer.addIceCandidate).not.toHaveBeenCalled();

@@ -32,6 +32,19 @@ function loadLegacyVfx() {
   return legacyScript;
 }
 
+function imageDimensions(image: CanvasImageSource, fallbackWidth: number, fallbackHeight: number) {
+  if (image instanceof HTMLVideoElement && image.videoWidth && image.videoHeight) {
+    return { width: image.videoWidth, height: image.videoHeight };
+  }
+  if (image instanceof HTMLImageElement && image.naturalWidth && image.naturalHeight) {
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  }
+  if ('width' in image && 'height' in image && Number(image.width) > 0 && Number(image.height) > 0) {
+    return { width: Number(image.width), height: Number(image.height) };
+  }
+  return { width: fallbackWidth, height: fallbackHeight };
+}
+
 export class CanvasVfxAdapter {
   private engine?: LegacyVfxEngine;
   private readonly effectsCanvas = document.createElement('canvas');
@@ -51,8 +64,12 @@ export class CanvasVfxAdapter {
     hands: Landmark[][],
     active: GestureName | null
   ) {
-    const width = canvas.clientWidth || 1280;
-    const height = canvas.clientHeight || 720;
+    const dimensions = imageDimensions(
+      image,
+      canvas.clientWidth || 1280,
+      canvas.clientHeight || 720
+    );
+    const { width, height } = dimensions;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;

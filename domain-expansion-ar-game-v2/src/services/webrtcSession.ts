@@ -41,6 +41,10 @@ export class WebRtcSessionService {
   playerReady() { this.sendSignal('playerReady', {}); }
   viewerRequested(to?: string) { this.sendSignal('viewerRequested', {}, to); }
   async handle(signalType: WebRtcSignalType, payload: WebRtcPayload, from: string, remoteRole: Role, localStream?: MediaStream) {
+    if (signalType === 'playerReady' && this.role === 'viewer') {
+      this.viewerRequested(from);
+      return;
+    }
     const pc = this.peer(from, remoteRole);
     if (signalType === 'viewerRequested' && this.role !== 'viewer' && localStream) {
       localStream.getTracks().forEach((track) => {

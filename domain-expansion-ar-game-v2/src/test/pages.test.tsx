@@ -103,6 +103,7 @@ const makeState = (overrides: Partial<MatchState> = {}): MatchState => ({
 });
 
 beforeEach(() => {
+  localStorage.setItem('domain-expansion-v2.settings', JSON.stringify({ ...defaultSettings, language: 'en' }));
   gameState = null;
   command.mockReset();
   signal.mockReset();
@@ -156,28 +157,52 @@ describe('PlayerApp', () => {
   it('renders online state, edits settings, starts and stops the camera', async () => {
     gameState = makeState();
     const { PlayerApp } = await import('../pages/PlayerApp');
-    render(<PlayerApp />);
-    expect(screen.getByText('術式順轉・蒼')).toBeTruthy();
+    render(<PlayerApp initialSettings={{ language: 'en' }} />);
+    expect(screen.getByText('Lapse Blue')).toBeTruthy();
     expect(screen.getByText(/Score 1\/3/)).toBeTruthy();
-    fireEvent.click(screen.getByText('Start camera'));
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
     expect(playerReady).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Stop'));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop camera' }));
     expect(cameraStop).toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'abcd' } });
     expect(screen.getByDisplayValue('ABCD')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'player2' } });
-    expect(screen.getByDisplayValue('Player 2')).toBeTruthy();
+    expect(screen.getByDisplayValue('PLAYER 2')).toBeTruthy();
+  });
+
+  it('shows phase status instead of the lobby placeholder during a battle', async () => {
+    const players = makeState().players;
+    gameState = makeState({
+      phase: 'countdown',
+      players: {
+        player1: { ...players.player1, challenge: null },
+        player2: { ...players.player2, challenge: null }
+      },
+      countdownEndsAt: Date.now() + 3000
+    });
+    const { PlayerApp } = await import('../pages/PlayerApp');
+    render(<PlayerApp initialSettings={{ language: 'en' }} />);
+    expect(screen.getByText('GET READY')).toBeTruthy();
+    expect(screen.queryByText('Waiting for battle')).toBeNull();
+  });
+
+  it('renders player controls in the selected language', async () => {
+    const { PlayerApp } = await import('../pages/PlayerApp');
+    render(<PlayerApp initialSettings={{ language: 'zh-TW' }} />);
+    expect(screen.getByRole('button', { name: '啟動相機' })).toBeTruthy();
+    expect(screen.getByText('玩家設定')).toBeTruthy();
+    expect(screen.getByText('等待對戰開始')).toBeTruthy();
   });
 
   it('runs solo controls and media popup behavior', async () => {
     localStorage.setItem('domain-expansion-v2.settings', JSON.stringify({
-      ...defaultSettings, playerMode: 'solo', videoMode: 'popup', autoOpenPopup: false
+      ...defaultSettings, language: 'en', playerMode: 'solo', videoMode: 'popup', autoOpenPopup: false
     }));
     const popup = { focus: vi.fn(), closed: false, postMessage: vi.fn() } as unknown as Window;
     vi.spyOn(window, 'open').mockReturnValue(popup);
     const { PlayerApp } = await import('../pages/PlayerApp');
-    const { container } = render(<PlayerApp />);
+    const { container } = render(<PlayerApp initialSettings={{ language: 'en' }} />);
     fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'solo' } });
     fireEvent.click(screen.getByText('Start round'));
     expect(container.querySelector('.player-header p')?.textContent).toContain('Local solo round');
@@ -185,15 +210,26 @@ describe('PlayerApp', () => {
     expect(screen.getByText('ROUND STOPPED')).toBeTruthy();
     fireEvent.click(screen.getByText('Open media popup'));
     expect(window.open).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Save settings'));
+    fireEvent.click(screen.getByText('Save & hide'));
     expect(localStorage.getItem('domain-expansion-v2.settings')).toContain('"playerMode":"solo"');
+    expect(screen.queryByLabelText('Mode')).toBeNull();
+    fireEvent.click(screen.getByText('Player settings'));
+    expect(screen.getByLabelText('Mode')).toBeTruthy();
   });
 });
 
 describe('BattleApp', () => {
+  it('renders battle controls in the selected language', async () => {
+    const { BattleApp } = await import('../pages/BattleApp');
+    render(<BattleApp initialSettings={{ language: 'ja' }} />);
+    expect(screen.getByText('設定を隠す')).toBeTruthy();
+    expect(screen.getByText('バトル開始')).toBeTruthy();
+    expect(screen.getAllByText('プレイヤー 1').length).toBeGreaterThan(0);
+  });
+
   it('renders lobby controls and starts a configured battle', async () => {
     const { BattleApp } = await import('../pages/BattleApp');
-    render(<BattleApp />);
+    render(<BattleApp initialSettings={{ language: 'en' }} />);
     expect(screen.getByText('DOMAIN CLASH')).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Countdown/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/Layout/), { target: { value: 'vertical-stack' } });
@@ -203,6 +239,11 @@ describe('BattleApp', () => {
     }));
     fireEvent.click(screen.getByText('Reset defaults'));
     expect(screen.getByText('Commentary is ready.')).toBeTruthy();
+    fireEvent.click(screen.getByText('儲存並隱藏'));
+    expect(screen.queryByLabelText(/Countdown/)).toBeNull();
+    expect(screen.getByText('開始對決')).toBeTruthy();
+    fireEvent.click(screen.getByText('戰局設定'));
+    expect(screen.getByLabelText(/倒數時間/)).toBeTruthy();
   });
 
   it('handles an active battle, WebRTC viewers and a cinematic', async () => {
@@ -216,7 +257,7 @@ describe('BattleApp', () => {
       }
     });
     const { BattleApp } = await import('../pages/BattleApp');
-    const { container } = render(<BattleApp />);
+    const { container } = render(<BattleApp initialSettings={{ language: 'en' }} />);
     await waitFor(() => expect(viewerRequested).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByText('Stop / reset'));
     expect(command).toHaveBeenCalledWith('match.reset');
@@ -226,17 +267,25 @@ describe('BattleApp', () => {
 
   it('shows results, skips video, and requests battle commentary', async () => {
     api.commentary.mockResolvedValue({ commentary: 'Player one dominates!' });
+    api.getSnapshot.mockResolvedValue({ success: true });
     gameState = makeState({ phase: 'ended', winner: 'PLAYER 1' });
     const { BattleApp } = await import('../pages/BattleApp');
-    render(<BattleApp />);
+    const first = render(<BattleApp initialSettings={{ language: 'en' }} />);
     await waitFor(() => expect(api.commentary).toHaveBeenCalledWith(
       '/api/battle-result', expect.objectContaining({ winner: 'PLAYER 1' })
     ));
+    expect(sessionStorage.getItem('domain-expansion-v2.result-video-played.match-123')).toBe('1');
     fireEvent.click(screen.getByText('Skip result video'));
     expect(screen.getByText('PLAYER 1 WINS')).toBeTruthy();
-    expect(screen.getByText(/PLAYER 1 1 · 2 PLAYER 2/)).toBeTruthy();
+    expect(screen.getByText('VICTORY')).toBeTruthy();
+    expect(screen.getByText('📜 Scroll of Honor (領域展影)')).toBeTruthy();
+    expect(screen.queryByText('Open Scroll of Honor')).toBeNull();
     fireEvent.click(screen.getByText('Back to lobby'));
     expect(command).toHaveBeenCalledWith('match.reset');
+    first.unmount();
+    render(<BattleApp initialSettings={{ language: 'en' }} />);
+    expect(screen.queryByText('Skip result video')).toBeNull();
+    expect(screen.getByText('PLAYER 1 WINS')).toBeTruthy();
   });
 });
 
@@ -255,7 +304,7 @@ describe('ShareApp', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const { ShareApp } = await import('../pages/ShareApp');
     render(<ShareApp />);
-    await screen.findByAltText('player1 match capture');
+    await screen.findByAltText('Player 1 match capture');
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ink-wash' } });
     fireEvent.click(screen.getByText('Generate AI portrait'));
     await screen.findByAltText('AI enhanced battle portrait');

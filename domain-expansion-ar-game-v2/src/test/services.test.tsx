@@ -32,6 +32,10 @@ describe('settings and popup messaging', () => {
     expect(loadSettings({ role: 'player2' })).toMatchObject({ language: 'en', difficulty: 5, role: 'player2' });
     localStorage.setItem('domain-expansion-v2.settings', '{bad');
     expect(loadSettings()).toEqual(defaultSettings);
+    expect(loadSettings({ roomCode: undefined, language: 'en' })).toMatchObject({
+      roomCode: defaultSettings.roomCode,
+      language: 'en'
+    });
     saveSettings({ ...defaultSettings, roomCode: 'ROOM9' });
     expect(loadSettings().roomCode).toBe('ROOM9');
     expect(roleLabel('player1')).toBe('Player 1');

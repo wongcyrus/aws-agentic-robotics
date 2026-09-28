@@ -19,7 +19,8 @@ export function loadConfig() {
     .then((response) => response.ok ? response.json() : Promise.reject(new Error(`config ${response.status}`)))
     .then((value) => AppConfigSchema.parse({
       ...value,
-      webSocketUrl: import.meta.env.VITE_WEBSOCKET_URL || value.webSocketUrl,
+      webSocketUrl: import.meta.env.VITE_WEBSOCKET_URL || value.webSocketUrl ||
+        `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/control`,
       apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? value.apiBaseUrl,
       cognitoUserPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID ?? value.cognitoUserPoolId,
       cognitoUserPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID ?? value.cognitoUserPoolClientId,

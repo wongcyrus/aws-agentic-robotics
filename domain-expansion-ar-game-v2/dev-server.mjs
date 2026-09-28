@@ -1,22 +1,54 @@
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer } from 'ws';
 
 const port = Number(process.env.PORT || 5173);
-const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'mpa' });
-const tls = process.env.VITE_HTTPS_CERT && process.env.VITE_HTTPS_KEY
-  ? { cert: readFileSync(process.env.VITE_HTTPS_CERT), key: readFileSync(process.env.VITE_HTTPS_KEY) }
+const explicitCert = process.env.VITE_HTTPS_CERT;
+const explicitKey = process.env.VITE_HTTPS_KEY;
+if (Boolean(explicitCert) !== Boolean(explicitKey)) {
+  throw new Error('VITE_HTTPS_CERT and VITE_HTTPS_KEY must be provided together');
+}
+const automaticTlsCandidates = process.env.E2E_TEST_MODE === '1' ? [] : [
+  [resolve('cert.pem'), resolve('key.pem')],
+  [resolve('../domain-expansion-ar-game/cert.pem'), resolve('../domain-expansion-ar-game/key.pem')]
+];
+const tlsFiles = explicitCert && explicitKey
+  ? [resolve(explicitCert), resolve(explicitKey)]
+  : automaticTlsCandidates.find(([cert, key]) => existsSync(cert) && existsSync(key));
+const tls = tlsFiles
+  ? { cert: readFileSync(tlsFiles[0]), key: readFileSync(tlsFiles[1]) }
   : null;
-const server = tls ? createHttpsServer(tls, vite.middlewares) : createHttpServer(vite.middlewares);
-const wss = new WebSocketServer({ server, path: '/control' });
+const server = tls ? createHttpsServer(tls) : createHttpServer();
+const vite = await createViteServer({
+  server: {
+    middlewareMode: true,
+    hmr: { server }
+  },
+  appType: 'mpa'
+});
+server.on('request', vite.middlewares);
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(
+    request.url ?? '/',
+    `http://${request.headers.host ?? 'localhost'}`
+  ).pathname;
+  if (pathname !== '/control') return;
+  wss.handleUpgrade(request, socket, head, (webSocket) => {
+    wss.emit('connection', webSocket, request);
+  });
+});
 const clients = new Map(), rooms = new Map();
 const techniques = [
   'Unlimited Void', 'Malevolent Shrine', 'Self-Embodiment of Perfection', 'Authentic Mutual Love',
   'Idle Death Gamble', 'Yuji Itadori', 'Chimera Shadow Garden', 'Time Cell Moon Palace',
   'Lapse Blue', 'Reversal Red', 'Hollow Purple'
 ];
+const e2eTestMode = process.env.E2E_TEST_MODE === '1';
+let e2eShuffleIndex = 0;
 const id = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const emptyPlayer = () => ({ connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null });
 const newState = (roomId) => ({
@@ -54,7 +86,12 @@ const publish = (state, correlationId) => {
   const message = envelope(state, 'room.snapshot', { state: publicState(state) }, correlationId);
   roomClients(state.roomId).forEach((client) => send(client, message));
 };
-const shuffle = () => [...techniques].sort(() => Math.random() - .5);
+const shuffle = () => {
+  if (!e2eTestMode) return [...techniques].sort(() => Math.random() - .5);
+  const first = e2eShuffleIndex++ % 2 === 0 ? 'Lapse Blue' : 'Reversal Red';
+  const second = first === 'Lapse Blue' ? 'Reversal Red' : 'Lapse Blue';
+  return Array.from({ length: techniques.length }, (_, index) => index % 2 === 0 ? first : second);
+};
 const assignChallenge = (state, role) => {
   const player = state.players[role];
   if (player.attempted >= state.config.challengeCount) {
@@ -118,9 +155,11 @@ wss.on('connection', (ws) => {
     state.processedCommands.add(command.messageId);
     const payload = command.payload ?? {};
     if (command.messageType === 'match.start' && client.role === 'viewer') {
+      const revision = state.revision;
       const currentConnections = Object.fromEntries(Object.entries(state.players).map(([role, player]) => [role, { connected: player.connected, clientId: player.clientId }]));
       const config = payload.config ?? {};
       Object.assign(state, newState(state.roomId));
+      state.revision = revision;
       state.players.player1 = { ...emptyPlayer(), ...currentConnections.player1 };
       state.players.player2 = { ...emptyPlayer(), ...currentConnections.player2 };
       state.matchId = id('match'); state.phase = 'countdown';
@@ -167,8 +206,10 @@ wss.on('connection', (ws) => {
         state.winner = state.pendingWinner; state.pendingWinner = null; state.phase = 'ended';
       } else { state.phase = 'playing'; resumeChallenges(state); }
     } else if (command.messageType === 'match.reset' && client.role === 'viewer') {
+      const revision = state.revision;
       const currentConnections = Object.fromEntries(Object.entries(state.players).map(([role, player]) => [role, { connected: player.connected, clientId: player.clientId }]));
       Object.assign(state, newState(state.roomId));
+      state.revision = revision;
       state.players.player1 = { ...emptyPlayer(), ...currentConnections.player1 };
       state.players.player2 = { ...emptyPlayer(), ...currentConnections.player2 };
     } else return;

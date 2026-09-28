@@ -8,6 +8,8 @@ Independent React + TypeScript + Vite rewrite of the AR player, battle viewer, p
 - `battle.html`: authoritative room view, WebRTC streams, match controls, configurable rules/layout, score-grace cinematics, event commentary, browser/Polly TTS, and results.
 - `player.html`: origin-validated popup media surface.
 - `share.html`: resolved snapshot images, portrait enhancement status, download, and Web Share/clipboard actions.
+- Player, battle, result, and Scroll of Honor UI supports English, Hong Kong
+  Traditional Chinese, Taiwan Traditional Chinese, and Japanese.
 - `src/core/protocol.ts`: typed Zod wire protocol with runtime validation.
 - `src/services/controlTransport.ts`: native WebSocket control transport.
 - `src/services/webrtcSession.ts`: isolated WebRTC signaling/session service.
@@ -35,11 +37,14 @@ npm run dev
 
 Open:
 
-- `http://localhost:5173/battle.html?room=BTL1`
-- `http://localhost:5173/?room=BTL1&role=player1`
-- `http://localhost:5173/?room=BTL1&role=player2`
+- `https://localhost:5173/battle.html?room=BTL1`
+- `https://localhost:5173/?room=BTL1&role=player1`
+- `https://localhost:5173/?room=BTL1&role=player2`
 
-`localhost` is treated as a secure camera context by browsers. For a LAN device or explicit HTTPS:
+The development server automatically reuses `cert.pem` and `key.pem` from the
+V1 project when they are available. The local WebSocket URL follows the page
+protocol, so HTTPS uses `wss://localhost:5173/control`. To use different
+certificates:
 
 ```bash
 VITE_HTTPS_CERT=/absolute/path/to/cert.pem \
@@ -47,7 +52,8 @@ VITE_HTTPS_KEY=/absolute/path/to/key.pem \
 npm run dev
 ```
 
-Update `public/config.json` to use `wss://<host>:5173/control` when HTTPS is enabled. Do not commit private keys.
+Do not commit private keys. When no certificate pair is available, the server
+falls back to HTTP and prints the resulting URL.
 
 Endpoint and Cognito values may be overridden without editing `config.json`:
 

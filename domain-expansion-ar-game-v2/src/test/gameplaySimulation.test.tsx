@@ -90,6 +90,7 @@ const config = {
 const playerSettings = (role: 'player1' | 'player2') => ({
   roomCode: 'SIM1',
   role,
+  language: 'en' as const,
   playerMode: 'battle' as const,
   disableRobotApi: false,
   robotCooldownSeconds: 10,
@@ -105,7 +106,7 @@ async function advance(milliseconds: number) {
 }
 
 async function startCameras() {
-  screen.getAllByText('Start camera').forEach((button) => fireEvent.click(button));
+  screen.getAllByRole('button', { name: 'Start camera' }).forEach((button) => fireEvent.click(button));
   await flush();
   expect(ScriptedCamera.instances.filter(({ active }) => active)).toHaveLength(2);
 }
@@ -142,6 +143,7 @@ async function mountFullGame(options: { challengeCount?: number; synchronizedGes
       scoreGraceMs: config.scoreGraceMs,
       synchronizedGestures: options.synchronizedGestures ?? false,
       commentatorEnabled: false,
+      language: 'en',
       videoMode: 'integrated'
     }} />
     <PlayerApp initialSettings={playerSettings('player1')} />
@@ -192,7 +194,7 @@ describe('deterministic React gameplay simulation', () => {
     expect(coordinator.state?.phase).toBe('cinematic');
 
     const videos = container.querySelectorAll('.cinematic video');
-    expect(videos).toHaveLength(2);
+    expect(container.querySelectorAll('.integrated-media')).toHaveLength(0);
     fireEvent.ended(videos[1]);
     expect(coordinator.state?.phase).toBe('cinematic');
     fireEvent.ended(videos[0]);
@@ -266,7 +268,7 @@ describe('deterministic React gameplay simulation', () => {
     act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
     act(() => coordinator.command('viewer', 'match.countdownCompleted'));
     render(<PlayerApp initialSettings={playerSettings('player1')} />);
-    fireEvent.click(screen.getByText('Start camera'));
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
     await flush();
     const camera = ScriptedCamera.instances[0];
     for (let frame = 0; frame < 5; frame += 1) camera.emit(framesFor('Lapse Blue'));
@@ -283,7 +285,7 @@ describe('deterministic React gameplay simulation', () => {
     act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
     act(() => coordinator.command('viewer', 'match.countdownCompleted'));
     render(<PlayerApp initialSettings={playerSettings('player1')} />);
-    fireEvent.click(screen.getByText('Start camera'));
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
     await flush();
     const camera = ScriptedCamera.instances[0];
     for (const target of [true, false, true, false, true, false, true, false, true]) {
@@ -314,9 +316,9 @@ describe('deterministic React gameplay simulation', () => {
     act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
     act(() => coordinator.command('viewer', 'match.countdownCompleted'));
     const player = render(<PlayerApp initialSettings={playerSettings('player1')} />);
-    expect(screen.getByText('術式順轉・蒼')).toBeTruthy();
+    expect(screen.getByText('Lapse Blue')).toBeTruthy();
     player.unmount();
-    const viewer = render(<BattleApp initialSettings={{ roomCode: 'SIM1', commentatorEnabled: false }} />);
+    const viewer = render(<BattleApp initialSettings={{ roomCode: 'SIM1', commentatorEnabled: false, language: 'en' }} />);
     expect(coordinator.state?.phase).toBe('playing');
     expect(screen.getByText('Lapse Blue')).toBeTruthy();
     viewer.unmount();
@@ -326,7 +328,7 @@ describe('deterministic React gameplay simulation', () => {
     reconnectedViewer.unmount();
 
     render(<PlayerApp initialSettings={playerSettings('player1')} />);
-    fireEvent.click(screen.getByText('Start camera'));
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
     await flush();
     const camera = ScriptedCamera.instances.at(-1)!;
     for (let frame = 0; frame < 5; frame += 1) camera.emit(framesFor('Lapse Blue'));
@@ -350,9 +352,9 @@ describe('deterministic React gameplay simulation', () => {
     fireEvent.click(screen.getAllByText('Skip cinematic')[0]);
     expect(coordinator.state?.phase).toBe('playing');
 
-    const playerStopButtons = screen.getAllByText('Stop');
+    const playerStopButtons = screen.getAllByRole('button', { name: 'Stop camera' });
     fireEvent.click(playerStopButtons[0]);
-    fireEvent.click(screen.getAllByText('Start camera')[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Start camera' })[0]);
     await flush();
     const restarted = ScriptedCamera.instances.at(-1)!;
     firstCamera.emit(framesFor('Reversal Red'));

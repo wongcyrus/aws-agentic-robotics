@@ -97,8 +97,13 @@ describe('browser adapters', () => {
     const canvas = document.createElement('canvas');
     Object.defineProperty(canvas, 'clientWidth', { value: 640 });
     Object.defineProperty(canvas, 'clientHeight', { value: 360 });
-    adapter.draw(canvas, document.createElement('video'), [[{ x: .2, y: .3 }]], 'Hollow Purple');
-    expect(canvas.width).toBe(640);
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'videoWidth', { value: 1024 });
+    Object.defineProperty(video, 'videoHeight', { value: 768 });
+    adapter.draw(canvas, video, [[{ x: .2, y: .3 }]], 'Hollow Purple');
+    expect(canvas.width).toBe(1024);
+    expect(canvas.height).toBe(768);
+    expect(context.drawImage).toHaveBeenCalledWith(video, 0, 0, 1024, 768);
     expect(context.arc).toHaveBeenCalled();
     expect(drawVFX).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), 'Hollow Purple', expect.any(Array));
   });

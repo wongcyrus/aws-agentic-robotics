@@ -3,6 +3,7 @@ import { Branding } from '../components/Branding';
 import { gestureLabel, getGesture, shuffledGestures, type GestureName } from '../core/catalog';
 import { deadlineFor, remainingSeconds, targetFor } from '../core/match';
 import { WebRtcSignalTypeSchema, type PlayerRole } from '../core/protocol';
+import { uiText } from '../core/uiText';
 import { MediaPipeCameraAdapter } from '../adapters/mediaPipeCamera';
 import { StableGestureRecognizer } from '../adapters/gestureRecognizer';
 import { CanvasVfxAdapter } from '../adapters/vfx';
@@ -34,13 +35,18 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     role: (query.get('role') as PlayerRole | null) ?? undefined,
     ...initialSettings
   }));
+  const text = uiText(settings.language);
   const { state, status, config, command, signal, subscribe } = useGameSession(settings.roomCode, settings.role);
+  const connectionStatus = status in text
+    ? text[status as 'loading' | 'connecting' | 'connected' | 'disconnected']
+    : status;
   const videoRef = useRef<HTMLVideoElement>(null), canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | undefined>(undefined), popupRef = useRef<Window | null>(null), webrtcRef = useRef<WebRtcSessionService | undefined>(undefined);
   const cameraRef = useRef<MediaPipeCameraAdapter | null>(null);
   const lastRobotActionAt = useRef(0);
   const pendingPopupMedia = useRef<string | null>(null);
-  const [cameraStatus, setCameraStatus] = useState('Camera stopped');
+  const [cameraStatus, setCameraStatus] = useState(text.cameraStopped);
+  const [cameraActive, setCameraActive] = useState(false);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [detected, setDetected] = useState<GestureName | null>(null);
   const [mediaSrc, setMediaSrc] = useState<string | null>(null);
@@ -48,6 +54,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const [feedback, setFeedback] = useState('');
   const [now, setNow] = useState(Date.now());
   const [solo, setSolo] = useState<SoloRound>(emptySoloRound);
+  const [showSettings, setShowSettings] = useState(true);
   const submittedChallenge = useRef<string | null>(null);
   const submittedSoloTarget = useRef<string | null>(null);
   const capturedPhase = useRef<string | null>(null);
@@ -58,7 +65,21 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const deadline = settings.playerMode === 'solo' ? solo.deadlineAt : battleDeadline;
   const score = settings.playerMode === 'solo' ? solo.score : player?.score ?? 0;
   const total = settings.playerMode === 'solo' ? settings.gestureCount : state?.config.challengeCount ?? settings.gestureCount;
-  const api = useMemo(() => config ? new ApiClient(config.apiBaseUrl, new LocalStorageTokenProvider()) : null, [config]);
+  const targetLabel = (() => {
+    const gesture = gestureLabel(target, settings.language);
+    if (gesture) return gesture;
+    if (settings.playerMode === 'solo') return solo.active ? text.prepareNext : text.startSoloRound;
+    if (!state || state.phase === 'idle') return text.waitingBattle;
+    if (state.phase === 'countdown') return text.getReady;
+    if (state.phase === 'resolving') return text.scoreLocked;
+    if (state.phase === 'cinematic') return text.techniqueActivated;
+    if (state.phase === 'ended') return text.battleComplete;
+    return player?.finished ? text.finished : text.prepareNext;
+  })();
+  const api = useMemo(
+    () => config?.apiBaseUrl ? new ApiClient(config.apiBaseUrl, new LocalStorageTokenProvider()) : null,
+    [config]
+  );
 
   const refreshCameras = async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -103,12 +124,14 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       });
       cameraRef.current = camera;
       streamRef.current = canvas.captureStream(30);
-      setCameraStatus('Camera + MediaPipe active');
+      setCameraActive(true);
+      setCameraStatus(text.cameraActive);
       await refreshCameras();
       webrtcRef.current?.playerReady();
     } catch (error) {
       console.error('Camera startup failed', error);
-      setCameraStatus(error instanceof Error ? error.message : 'Camera failed');
+      setCameraActive(false);
+      setCameraStatus(error instanceof Error ? error.message : text.cameraFailed);
     }
   };
   const stopCamera = () => {
@@ -116,7 +139,8 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     cameraRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = undefined;
-    setCameraStatus('Camera stopped');
+    setCameraActive(false);
+    setCameraStatus(text.cameraStopped);
   };
   useEffect(() => stopCamera, []);
 
@@ -124,7 +148,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     if (settings.disableRobotApi || !api || !config) return;
     const elapsed = Date.now() - lastRobotActionAt.current;
     if (elapsed < settings.robotCooldownSeconds * 1000) {
-      setCameraStatus(`Robot cooldown ${Math.ceil((settings.robotCooldownSeconds * 1000 - elapsed) / 1000)}s`);
+      setCameraStatus(text.robotCooldownRemaining(Math.ceil((settings.robotCooldownSeconds * 1000 - elapsed) / 1000)));
       return;
     }
     const catalogEntry = getGesture(gesture);
@@ -132,7 +156,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     lastRobotActionAt.current = Date.now();
     void api.triggerTechnique(settings.robotId, catalogEntry.robotTechnique, config.defaultSessionKey).catch((error) => {
       console.error('Robot technique failed', error);
-      setCameraStatus(error instanceof Error ? error.message : 'Robot technique failed');
+      setCameraStatus(error instanceof Error ? error.message : text.robotFailed);
     });
   };
 
@@ -150,7 +174,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     pendingPopupMedia.current = src;
     if (!popupRef.current || popupRef.current.closed) {
       if (!settings.autoOpenPopup) {
-        setCameraStatus('Open the media popup to play the technique');
+        setCameraStatus(text.popupRequired);
         return;
       }
       openPopup();
@@ -162,7 +186,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const advanceSolo = (queue: GestureName[], score: number, attempted: number) => {
     const [next, ...remaining] = queue;
     if (!next) {
-      setSolo({ active: false, score, attempted, queue: [], target: null, deadlineAt: null, result: score === settings.gestureCount ? 'PERFECT!' : 'ROUND COMPLETE' });
+      setSolo({ active: false, score, attempted, queue: [], target: null, deadlineAt: null, result: score === settings.gestureCount ? text.perfect : text.roundComplete });
       setMediaMuted(false);
       setMediaSrc(score === settings.gestureCount ? '/static/video/win/onepunch.mp4' : '/static/video/lose/shiba1.mp4');
       return;
@@ -171,7 +195,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     setSolo({ active: true, score, attempted, queue: remaining, target: next, deadlineAt: Date.now() + settings.difficulty * 1000, result: null });
   };
   const startSolo = () => advanceSolo(shuffledGestures(settings.gestureCount), 0, 0);
-  const stopSolo = () => setSolo({ ...emptySoloRound, result: 'ROUND STOPPED' });
+  const stopSolo = () => setSolo({ ...emptySoloRound, result: text.roundStopped });
 
   useEffect(() => {
     if (settings.playerMode === 'solo') {
@@ -181,7 +205,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       if (!gesture) return;
       const nextScore = solo.score + 1;
       const nextAttempted = solo.attempted + 1;
-      setFeedback('SUCCESS!');
+      setFeedback(text.success);
       setTimeout(() => setFeedback(''), 900);
       playMedia(gesture.video);
       triggerRobot(solo.target);
@@ -196,7 +220,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     const gesture = getGesture(battleTarget);
     if (!gesture) return;
     submittedChallenge.current = challenge.challengeId;
-    setFeedback('SUCCESS!');
+    setFeedback(text.success);
     setTimeout(() => setFeedback(''), 900);
     command('challenge.succeeded', { challengeId: challenge.challengeId, technique: battleTarget, videoSrc: gesture.video });
     triggerRobot(battleTarget);
@@ -226,19 +250,18 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     capturedPhase.current = captureKey;
     void api.uploadSnapshot(state.matchId, settings.role, phase, canvasRef.current.toDataURL('image/jpeg', .82)).catch((error) => {
       console.warn('Snapshot upload failed', error);
-      setCameraStatus(error instanceof Error ? error.message : 'Snapshot upload failed');
+      setCameraStatus(error instanceof Error ? error.message : text.snapshotFailed);
     });
   }, [api, cameraStatus, settings.role, state?.config.captureSnapshots, state?.matchId, state?.phase]);
 
   useEffect(() => {
-    const cast = state?.cinematic?.casts.find(({ role }) => role === settings.role) ?? state?.cinematic?.casts[0];
-    if (cast?.videoSrc) playMedia(cast.videoSrc);
-  }, [settings.role, state?.cinematic?.cinematicId]);
+    if (settings.playerMode === 'battle') setMediaSrc(null);
+  }, [settings.playerMode]);
 
   useEffect(() => {
     const listener = (event: MessageEvent) => {
       if (readPopupMessage(event, popupRef.current)?.type !== 'PLAYER_READY') return;
-      setCameraStatus((value) => `${value}; popup ready`);
+      setCameraStatus((value) => `${value}; ${text.popupReady}`);
       if (popupRef.current && pendingPopupMedia.current) {
         postToPopup(popupRef.current, { type: 'PLAY_VIDEO', videoSrc: pendingPopupMedia.current });
         pendingPopupMedia.current = null;
@@ -254,45 +277,54 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     <canvas ref={canvasRef} className="camera-canvas" />
     <header className="player-header">
       <img src="/static/img/jujutsu-kaisen-logo.png" alt="Jujutsu Kaisen" />
-      <span className="role-pill">{settings.playerMode === 'solo' ? 'SOLO' : `${settings.role} · ${settings.roomCode}`}</span>
+      <span className="role-pill">{settings.playerMode === 'solo' ? text.solo : `${text.playerLabel(settings.role === 'player1' ? 1 : 2)} · ${settings.roomCode}`}</span>
       <h1>領域展開 AR <b>V2</b></h1>
-      <p>{settings.playerMode === 'solo' ? 'Local solo round' : status} · {cameraStatus}</p>
+      <p>{settings.playerMode === 'solo' ? text.localSoloRound : connectionStatus} · {cameraStatus}</p>
     </header>
     <section className="hud">
-      <small>TARGET</small><strong style={{ color: getGesture(target)?.color }}>{gestureLabel(target, settings.language) ?? 'Waiting for battle'}</strong>
-      <div><span>Score {score}/{total}</span><span>{remainingSeconds(deadline, now)}s</span></div>
-      <em>Detected: {gestureLabel(detected, settings.language) ?? '—'}</em>
+      <small>{text.target}</small><strong style={{ color: getGesture(target)?.color }}>{targetLabel}</strong>
+      <div><span>{text.score} {score}/{total}</span><span>{remainingSeconds(deadline, now)}s</span></div>
+      <em>{text.detected}: {gestureLabel(detected, settings.language) ?? '—'}</em>
     </section>
     {feedback && <div className="success-feedback">{feedback}</div>}
-    <aside className="settings-card">
-      <div className="button-row"><button onClick={() => void startCamera()}>Start camera</button><button onClick={stopCamera}>Stop</button></div>
-      <label>Mode<select value={settings.playerMode} onChange={(event) => setSettings({ ...settings, playerMode: event.target.value as typeof settings.playerMode })}><option value="battle">Online battle</option><option value="solo">Solo mini-game</option></select></label>
+    <button
+      className={`camera-toggle ${cameraActive ? 'active' : ''}`}
+      aria-label={cameraActive ? text.stopCamera : text.startCamera}
+      title={cameraActive ? text.stopCamera : text.startCamera}
+      onClick={() => cameraActive ? stopCamera() : void startCamera()}
+    >📷</button>
+    <button className="panel-toggle player-panel-toggle" onClick={() => setShowSettings((visible) => !visible)}>
+      {showSettings ? text.hideSettings : text.playerSettings}
+    </button>
+    {showSettings && <aside className="settings-card">
+      <button className="panel-close" aria-label={text.hideSettings} onClick={() => setShowSettings(false)}>×</button>
+      <label>{text.mode}<select value={settings.playerMode} onChange={(event) => setSettings({ ...settings, playerMode: event.target.value as typeof settings.playerMode })}><option value="battle">{text.onlineBattle}</option><option value="solo">{text.soloGame}</option></select></label>
       {settings.playerMode === 'solo'
-        ? <div className="button-row"><button className="primary" onClick={startSolo}>Start round</button><button onClick={stopSolo}>Quit</button></div>
+        ? <div className="button-row"><button className="primary" onClick={startSolo}>{text.startRound}</button><button onClick={stopSolo}>{text.quit}</button></div>
         : <>
-          <label>Room<input value={settings.roomCode} onChange={(event) => setSettings({ ...settings, roomCode: event.target.value.toUpperCase() })} /></label>
-          <label>Role<select value={settings.role} onChange={(event) => setSettings({ ...settings, role: event.target.value as PlayerRole })}><option value="player1">Player 1</option><option value="player2">Player 2</option></select></label>
+          <label>{text.room}<input value={settings.roomCode} onChange={(event) => setSettings({ ...settings, roomCode: event.target.value.toUpperCase() })} /></label>
+          <label>{text.role}<select value={settings.role} onChange={(event) => setSettings({ ...settings, role: event.target.value as PlayerRole })}><option value="player1">{text.playerLabel(1)}</option><option value="player2">{text.playerLabel(2)}</option></select></label>
         </>}
       <details>
-        <summary>Player settings</summary>
-        <label>Camera<select value={settings.cameraId} onChange={(event) => setSettings({ ...settings, cameraId: event.target.value })}><option value="default">Default camera</option>{cameras.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `Camera ${index + 1}`}</option>)}</select></label>
-        <label>Language<select value={settings.language} onChange={(event) => setSettings({ ...settings, language: event.target.value as typeof settings.language })}><option value="zh-HK">廣東話</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option></select></label>
-        <label>Video<select value={settings.videoMode} onChange={(event) => setSettings({ ...settings, videoMode: event.target.value as typeof settings.videoMode })}><option value="integrated">Integrated with sound</option><option value="integrated_silent">Integrated silent</option><option value="popup">Popup tab</option><option value="none">No video</option></select></label>
-        <label><input type="checkbox" checked={settings.autoOpenPopup} onChange={(event) => setSettings({ ...settings, autoOpenPopup: event.target.checked })} /> Auto-open popup</label>
-        <button onClick={openPopup}>Open media popup</button>
-        <label>Round seconds <input type="range" min="3" max="15" value={settings.difficulty} onChange={(event) => setSettings({ ...settings, difficulty: Number(event.target.value) })} />{settings.difficulty}s</label>
-        <label>Techniques <input type="range" min="1" max="11" value={settings.gestureCount} onChange={(event) => setSettings({ ...settings, gestureCount: Number(event.target.value) })} />{settings.gestureCount}</label>
-        <label>Robot<select value={settings.robotId} onChange={(event) => setSettings({ ...settings, robotId: event.target.value })}><option value="all">All robots</option>{[1,2,3,4,5,6].map((number) => <option key={number} value={`robot_${number}`}>Robot {number}</option>)}</select></label>
-        <label>Robot cooldown <input type="range" min="1" max="30" value={settings.robotCooldownSeconds} onChange={(event) => setSettings({ ...settings, robotCooldownSeconds: Number(event.target.value) })} />{settings.robotCooldownSeconds}s</label>
-        <label><input type="checkbox" checked={settings.disableRobotApi} onChange={(event) => setSettings({ ...settings, disableRobotApi: event.target.checked })} /> Disable robot API</label>
+        <summary>{text.playerSettings}</summary>
+        <label>{text.camera}<select value={settings.cameraId} onChange={(event) => setSettings({ ...settings, cameraId: event.target.value })}><option value="default">{text.defaultCamera}</option>{cameras.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `${text.camera} ${index + 1}`}</option>)}</select></label>
+        <label>{text.language}<select value={settings.language} onChange={(event) => setSettings({ ...settings, language: event.target.value as typeof settings.language })}><option value="zh-HK">廣東話</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option></select></label>
+        <label>{text.video}<select value={settings.videoMode} onChange={(event) => setSettings({ ...settings, videoMode: event.target.value as typeof settings.videoMode })}><option value="integrated">{text.integratedSound}</option><option value="integrated_silent">{text.integratedSilent}</option><option value="popup">{text.popupTab}</option><option value="none">{text.noVideo}</option></select></label>
+        <label><input type="checkbox" checked={settings.autoOpenPopup} onChange={(event) => setSettings({ ...settings, autoOpenPopup: event.target.checked })} /> {text.autoOpenPopup}</label>
+        <button onClick={openPopup}>{text.openMediaPopup}</button>
+        <label>{text.roundSeconds} <input type="range" min="3" max="15" value={settings.difficulty} onChange={(event) => setSettings({ ...settings, difficulty: Number(event.target.value) })} />{settings.difficulty}s</label>
+        <label>{text.techniques} <input type="range" min="1" max="11" value={settings.gestureCount} onChange={(event) => setSettings({ ...settings, gestureCount: Number(event.target.value) })} />{settings.gestureCount}</label>
+        <label>{text.robot}<select value={settings.robotId} onChange={(event) => setSettings({ ...settings, robotId: event.target.value })}><option value="all">{text.allRobots}</option>{[1,2,3,4,5,6].map((number) => <option key={number} value={`robot_${number}`}>{text.robot} {number}</option>)}</select></label>
+        <label>{text.robotCooldown} <input type="range" min="1" max="30" value={settings.robotCooldownSeconds} onChange={(event) => setSettings({ ...settings, robotCooldownSeconds: Number(event.target.value) })} />{settings.robotCooldownSeconds}s</label>
+        <label><input type="checkbox" checked={settings.disableRobotApi} onChange={(event) => setSettings({ ...settings, disableRobotApi: event.target.checked })} /> {text.disableRobotApi}</label>
       </details>
       <button onClick={() => {
         saveSettings(settings);
-        location.search = settings.playerMode === 'battle' ? `?room=${settings.roomCode}&role=${settings.role}` : '';
-      }}>Save settings</button>
-      <a href={`/battle.html?room=${settings.roomCode}`}>Open battle viewer</a>
-    </aside>
-    {mediaSrc && <video className="integrated-media" src={mediaSrc} autoPlay muted={mediaMuted} playsInline controls onEnded={() => setMediaSrc(null)} />}
-    {solo.result && <section className="result"><h2>{solo.result}</h2><p>Final score: {solo.score}/{settings.gestureCount}</p><button onClick={startSolo}>Play again</button><button onClick={() => setSolo(emptySoloRound)}>Close</button></section>}
+        setShowSettings(false);
+      }}>{text.saveHide}</button>
+      <a href={`/battle.html?room=${settings.roomCode}`}>{text.openBattleViewer}</a>
+    </aside>}
+    {settings.playerMode === 'solo' && mediaSrc && <video className="integrated-media" src={mediaSrc} autoPlay muted={mediaMuted} playsInline controls onEnded={() => setMediaSrc(null)} />}
+    {solo.result && <section className="result"><h2>{solo.result}</h2><p>{text.finalScore}: {solo.score}/{settings.gestureCount}</p><button onClick={startSolo}>{text.playAgain}</button><button onClick={() => setSolo(emptySoloRound)}>{text.close}</button></section>}
   </main>;
 }
