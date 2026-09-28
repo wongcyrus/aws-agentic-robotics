@@ -295,6 +295,31 @@ describe('BattleApp', () => {
     expect(command).toHaveBeenCalledWith('cinematic.completed', { cinematicId: 'cin-1' });
   });
 
+  it('waits for opening commentary playback before completing the countdown', async () => {
+    let openingUtterance: { onend?: () => void } | undefined;
+    vi.stubGlobal('speechSynthesis', {
+      getVoices: vi.fn(() => [{ name: 'Gojo' }]),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      cancel: vi.fn(),
+      speak: vi.fn((utterance) => { openingUtterance = utterance; })
+    });
+    api.registerRoom.mockResolvedValue(undefined);
+    api.commentary.mockResolvedValue({ commentary: 'Prepare to expand your domains.' });
+    gameState = makeState({
+      phase: 'countdown',
+      countdownEndsAt: Date.now() - 1,
+      config: { ...makeState().config, captureSnapshots: false }
+    });
+    const { BattleApp } = await import('../pages/BattleApp');
+    render(<BattleApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(openingUtterance).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(command).not.toHaveBeenCalledWith('match.countdownCompleted');
+    openingUtterance?.onend?.();
+    await waitFor(() => expect(command).toHaveBeenCalledWith('match.countdownCompleted'));
+  });
+
   it('shows results, skips video, and requests battle commentary', async () => {
     api.commentary.mockResolvedValue({ commentary: 'Player one dominates!' });
     api.getSnapshot.mockResolvedValue({ success: true });

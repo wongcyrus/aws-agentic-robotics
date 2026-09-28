@@ -185,7 +185,13 @@ describe('configuration, commentary and auth gate', () => {
     await player.play({ commentary: 'Domain!', ttsMode: 'aws', audioUrl: '/speech.mp3' }, defaultSettings);
     expect(audioChanges.at(-1)).toBeDefined();
     expect(speakingChanges.at(-1)).toBe(true);
+    let playbackFinished = false;
+    void player.waitForPlayback().then(() => { playbackFinished = true; });
+    await Promise.resolve();
+    expect(playbackFinished).toBe(false);
     audioInstance?.onended?.();
+    await player.waitForPlayback();
+    expect(playbackFinished).toBe(true);
     expect(audioChanges.at(-1)).toBeUndefined();
     expect(speakingChanges.at(-1)).toBe(false);
   });

@@ -81,6 +81,44 @@ const readJson = (request) => new Promise((resolveBody, reject) => {
   request.on('error', reject);
 });
 const score = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+const snapshotPhaseForCommentary = (body, path) => {
+  if (path === '/api/battle-result') return 'END';
+  if (body.isReset || body.eventType === 'RESET') return 'START';
+  return null;
+};
+const shouldAttachCommentaryImages = (body, path) => {
+  const policy = body.agentImagePolicy || 'always';
+  return policy === 'always' || Boolean(policy === 'start_end' && snapshotPhaseForCommentary(body, path));
+};
+const parseImageDataUrl = (image) => {
+  if (typeof image !== 'string') return null;
+  const match = /^data:image\/(jpeg|jpg|png|gif|webp);base64,(.+)$/i.exec(image);
+  if (!match) return null;
+  return {
+    format: match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase(),
+    bytes: Buffer.from(match[2], 'base64')
+  };
+};
+const commentarySnapshots = async (body, path) => {
+  if (!shouldAttachCommentaryImages(body, path) || !body.sessionId) return [];
+  const preferredPhase = snapshotPhaseForCommentary(body, path);
+  const findSnapshots = () => ['player1', 'player2'].flatMap((role) => {
+    const image = preferredPhase
+      ? snapshots.get(`${body.sessionId}:${role}:${preferredPhase}`)
+      : snapshots.get(`${body.sessionId}:${role}:END`) ?? snapshots.get(`${body.sessionId}:${role}:START`);
+    const parsed = parseImageDataUrl(image);
+    return parsed ? [{ role, image, ...parsed }] : [];
+  });
+  let found = findSnapshots();
+  if (preferredPhase) {
+    for (let attempt = 0; attempt < 10 && found.length < 2; attempt += 1) {
+      await delay(300);
+      found = findSnapshots();
+    }
+  }
+  return found;
+};
 const pollyVoices = {
   'zh-HK': { voiceId: 'Hiujin', engine: 'neural', languageCode: 'yue-CN' },
   'zh-TW': { voiceId: 'Zhiyu', engine: 'neural', languageCode: 'cmn-CN' },
@@ -137,17 +175,11 @@ const resolveCommentaryLambda = async () => {
   } while (marker);
   throw new Error('Unable to find the deployed Domain Expansion V2 backend Lambda');
 };
-const invokeDeployedCommentary = async (body, path) => {
-  const functionName = await resolveCommentaryLambda();
+const invokeLambdaHttp = async (functionName, path, body) => {
   const event = {
     path,
     httpMethod: 'POST',
-    body: JSON.stringify({
-      ...body,
-      agent_type: 'local_direct',
-      agentImagePolicy: 'never',
-      ttsMode: 'aws'
-    })
+    body: JSON.stringify(body)
   };
   const result = await lambda.send(new InvokeCommand({
     FunctionName: functionName,
@@ -160,6 +192,24 @@ const invokeDeployedCommentary = async (body, path) => {
   if (lambdaResponse.statusCode < 200 || lambdaResponse.statusCode >= 300) {
     throw new Error(responseBody.message || responseBody.error || `Lambda returned ${lambdaResponse.statusCode}`);
   }
+  return responseBody;
+};
+const invokeDeployedCommentary = async (body, path) => {
+  const functionName = await resolveCommentaryLambda();
+  const attachedSnapshots = await commentarySnapshots(body, path);
+  await Promise.all(attachedSnapshots.map(({ role, image }) =>
+    invokeLambdaHttp(functionName, '/api/webcam-upload', {
+      sessionId: body.sessionId,
+      role,
+      image
+    })
+  ));
+  const responseBody = await invokeLambdaHttp(functionName, path, {
+    ...body,
+    agent_type: 'local_direct',
+    agentImagePolicy: attachedSnapshots.length ? 'always' : 'never',
+    ttsMode: 'aws'
+  });
   if (responseBody.ttsMode !== 'aws' || !responseBody.audioUrl) {
     throw new Error('Deployed commentary Lambda did not return Polly audio');
   }
@@ -194,12 +244,18 @@ const buildCommentaryPrompt = (body, path) => {
   return `${event}\n${languageRule}\n${cleanLanguageRule}\nOutput only Kugisaki Nobara's direct, high-energy commentary in no more than two short sentences.`;
 };
 const generateCommentary = async (body, path) => {
+  const attachedSnapshots = await commentarySnapshots(body, path);
+  const content = attachedSnapshots.flatMap(({ role, format, bytes }) => [
+    { text: `${role === 'player1' ? 'Player 1' : 'Player 2'} webcam snapshot:` },
+    { image: { format, source: { bytes } } }
+  ]);
+  content.push({ text: buildCommentaryPrompt(body, path) });
   const result = await bedrock.send(new ConverseCommand({
     modelId: bedrockModelId,
     system: [{
       text: 'You are Kugisaki Nobara acting as a confident, fashionable Jujutsu Kaisen battle commentator. Be punchy, dramatic, and specific to the supplied event. Never include analysis, labels, or preamble.'
     }],
-    messages: [{ role: 'user', content: [{ text: buildCommentaryPrompt(body, path) }] }],
+    messages: [{ role: 'user', content }],
     inferenceConfig: { maxTokens: 400 }
   }));
   const commentary = result.output?.message?.content
@@ -209,7 +265,13 @@ const generateCommentary = async (body, path) => {
   const response = {
     commentary,
     ttsMode: 'browser',
-    requestedTtsMode: body.ttsMode === 'aws' ? 'aws' : 'browser'
+    requestedTtsMode: body.ttsMode === 'aws' ? 'aws' : 'browser',
+    debugImageContext: {
+      shouldAttachImage: shouldAttachCommentaryImages(body, path),
+      hasImageP1: attachedSnapshots.some(({ role }) => role === 'player1'),
+      hasImageP2: attachedSnapshots.some(({ role }) => role === 'player2'),
+      phase: snapshotPhaseForCommentary(body, path)
+    }
   };
   if (body.ttsMode !== 'aws') return response;
   try {

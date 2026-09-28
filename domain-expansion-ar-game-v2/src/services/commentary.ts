@@ -13,13 +13,35 @@ export interface CommentaryResponse {
 
 export class CommentaryPlayer {
   private audio?: HTMLAudioElement;
+  private playbackFinished: Promise<void> = Promise.resolve();
+  private finishPlayback: () => void = () => undefined;
 
   constructor(
     private readonly onSpeakingChange: (speaking: boolean) => void = () => undefined,
     private readonly onAudioChange: (audio?: HTMLAudioElement) => void = () => undefined
   ) {}
 
+  private beginPlayback() {
+    this.finishPlayback();
+    let finished = false;
+    let resolvePlayback: () => void = () => undefined;
+    this.playbackFinished = new Promise<void>((resolve) => {
+      resolvePlayback = resolve;
+    });
+    this.finishPlayback = () => {
+      if (finished) return;
+      finished = true;
+      resolvePlayback();
+    };
+    return this.finishPlayback;
+  }
+
+  waitForPlayback() {
+    return this.playbackFinished;
+  }
+
   stop() {
+    this.finishPlayback();
     this.onSpeakingChange(false);
     this.onAudioChange(undefined);
     if ('speechSynthesis' in window) speechSynthesis.cancel();
@@ -38,6 +60,7 @@ export class CommentaryPlayer {
 
     if (response.ttsMode === 'aws' && response.audioUrl) {
       this.audio = new Audio(response.audioUrl);
+      const finishPlayback = this.beginPlayback();
       this.onAudioChange(this.audio);
       this.audio.volume = settings.commentaryVolume / 100;
       this.audio.onplay = () => this.onSpeakingChange(true);
@@ -45,6 +68,7 @@ export class CommentaryPlayer {
         this.onSpeakingChange(false);
         this.onAudioChange(undefined);
         this.audio = undefined;
+        finishPlayback();
       };
       this.audio.onended = finishAudio;
       this.audio.onerror = finishAudio;
@@ -52,6 +76,7 @@ export class CommentaryPlayer {
         await this.audio.play();
         return;
       } catch {
+        finishPlayback();
         this.audio = undefined;
         this.onAudioChange(undefined);
       }
@@ -60,11 +85,18 @@ export class CommentaryPlayer {
     if (!('speechSynthesis' in window)) return;
     this.onAudioChange(undefined);
     const utterance = new SpeechSynthesisUtterance(text);
+    const finishPlayback = this.beginPlayback();
     utterance.lang = settings.language;
     utterance.volume = settings.commentaryVolume / 100;
     utterance.onstart = () => this.onSpeakingChange(true);
-    utterance.onend = () => this.onSpeakingChange(false);
-    utterance.onerror = () => this.onSpeakingChange(false);
+    utterance.onend = () => {
+      this.onSpeakingChange(false);
+      finishPlayback();
+    };
+    utterance.onerror = () => {
+      this.onSpeakingChange(false);
+      finishPlayback();
+    };
     if (settings.commentaryVoice !== 'auto') {
       utterance.voice = speechSynthesis.getVoices().find(({ name }) => name === settings.commentaryVoice) ?? null;
     }

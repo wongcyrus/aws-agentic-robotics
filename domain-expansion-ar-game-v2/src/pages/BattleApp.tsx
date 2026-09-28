@@ -50,6 +50,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const completedCinematic = useRef<string | null>(null);
   const completedCastVideos = useRef(new Set<string>());
   const introducedMatches = useRef(new Set<string>());
+  const completedIntroductions = useRef(new Set<string>());
   const narratedResolutions = useRef(new Set<string>());
   const narratedResults = useRef(new Set<string>());
   const criticalMarks = useRef(new Set<string>());
@@ -152,22 +153,34 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   };
 
   useEffect(() => {
-    if (!api || state?.phase !== 'countdown' || !state.matchId || introducedMatches.current.has(state.matchId)) return;
+    if (state?.phase !== 'countdown' || !state.matchId || introducedMatches.current.has(state.matchId)) return;
     introducedMatches.current.add(state.matchId);
+    if (!api || !settings.commentatorEnabled) {
+      completedIntroductions.current.add(state.matchId);
+      return;
+    }
     void (async () => {
       try {
         await api.registerRoom(state.matchId!, settings.roomCode, config?.webSocketUrl ?? '');
         if (state.config.captureSnapshots) await delay(1200);
         await requestCommentary('/api/live-status', { eventType: 'RESET', isReset: true });
+        await Promise.race([
+          commentaryPlayer.current.waitForPlayback(),
+          delay(30_000)
+        ]);
       } catch (error) {
         console.warn('Match introduction setup failed', error);
         setCommentaryError(error instanceof Error ? error.message : 'Match introduction failed');
+      } finally {
+        completedIntroductions.current.add(state.matchId!);
       }
     })();
-  }, [api, config?.webSocketUrl, settings.roomCode, state?.matchId, state?.phase]);
+  }, [api, config?.webSocketUrl, settings.commentatorEnabled, settings.roomCode, state?.matchId, state?.phase]);
 
   useEffect(() => {
-    if (state?.phase === 'countdown' && state.matchId && state.countdownEndsAt && now >= state.countdownEndsAt && completedCountdown.current !== state.matchId) {
+    if (state?.phase === 'countdown' && state.matchId && state.countdownEndsAt &&
+      now >= state.countdownEndsAt && completedIntroductions.current.has(state.matchId) &&
+      completedCountdown.current !== state.matchId) {
       completedCountdown.current = state.matchId;
       command('match.countdownCompleted');
     }
