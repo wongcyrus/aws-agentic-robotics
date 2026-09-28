@@ -111,7 +111,10 @@ test('browser gesture fixtures reach every production recognizer branch', async 
 });
 
 test('three isolated browsers complete dual-success gameplay and reset', async ({ browser }) => {
-  const value = await arena(browser, 'full', { synchronizedGestures: false });
+  const value = await arena(browser, 'full', {
+    synchronizedGestures: false,
+    aiPortraitEnabled: true
+  });
   await expect(value.viewer.locator('.fighter.player1')).toContainText('Waiting for player 1 stream');
   await expect(value.player1.locator('.role-pill')).toContainText(`PLAYER 1 · ${value.room}`);
   await expect(value.player2.locator('.role-pill')).toContainText(`PLAYER 2 · ${value.room}`);
@@ -137,6 +140,8 @@ test('three isolated browsers complete dual-success gameplay and reset', async (
 
   await value.viewer.getByRole('button', { name: 'Skip result video' }).click();
   await expect(value.viewer.locator('.result')).toContainText('DRAW');
+  await expect(value.viewer.getByAltText('Player 1 match capture')).toBeVisible();
+  await expect(value.viewer.getByAltText('Player 2 match capture')).toBeVisible();
   await value.viewer.getByRole('button', { name: 'Back to lobby' }).click();
   await expect(value.player1.locator('.hud strong')).toHaveText('Waiting for battle');
   await expect(value.player2.locator('.hud')).toContainText('Score 0/1');

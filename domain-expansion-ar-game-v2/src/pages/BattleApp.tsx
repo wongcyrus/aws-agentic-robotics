@@ -142,7 +142,8 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         countdownSeconds: settings.countdownSeconds,
         scoreGraceMs: settings.scoreGraceMs,
         synchronizedGestures: settings.synchronizedGestures,
-        captureSnapshots: settings.commentatorEnabled && settings.commentatorWebcam && settings.commentatorImagePolicy !== 'never'
+        captureSnapshots: settings.aiPortraitEnabled ||
+          (settings.commentatorEnabled && settings.commentatorWebcam && settings.commentatorImagePolicy !== 'never')
       }
     });
   };
@@ -281,7 +282,11 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
 
   return <main className={`battle-page layout-${settings.layout} ${settings.dynamicView ? 'dynamic-view' : ''}`}>
     <Branding />
-    <header className="battle-header"><h1>DOMAIN CLASH <b>V2</b></h1><span>{settings.roomCode} · {connectionStatus}</span></header>
+    <header className="battle-header">
+      <img src="/static/img/jujutsu-kaisen-logo.png" alt="JJK Logo" />
+      <strong>領域展開 AR</strong>
+      <span>{settings.roomCode} · {connectionStatus}</span>
+    </header>
     <section className="arena">{playerCard('player1')}<div className="versus">VS</div>{playerCard('player2')}</section>
     <div className="power-bar"><span style={{ width: `${p1Score / scoreTotal * 100}%` }} /><span style={{ width: `${p2Score / scoreTotal * 100}%` }} /></div>
     <div className="battle-ticker">{ticker.slice(-3).map((entry, index) => <span key={`${entry}-${index}`}>{entry}</span>)}</div>

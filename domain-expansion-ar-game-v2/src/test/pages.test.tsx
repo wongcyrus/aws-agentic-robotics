@@ -230,12 +230,13 @@ describe('BattleApp', () => {
   it('renders lobby controls and starts a configured battle', async () => {
     const { BattleApp } = await import('../pages/BattleApp');
     render(<BattleApp initialSettings={{ language: 'en' }} />);
-    expect(screen.getByText('DOMAIN CLASH')).toBeTruthy();
+    expect(screen.getByAltText('JJK Logo')).toBeTruthy();
+    expect(screen.getByText('領域展開 AR')).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Countdown/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/Layout/), { target: { value: 'vertical-stack' } });
     fireEvent.click(screen.getByText('Start battle'));
     expect(command).toHaveBeenCalledWith('match.start', expect.objectContaining({
-      config: expect.objectContaining({ countdownSeconds: 5 })
+      config: expect.objectContaining({ countdownSeconds: 5, captureSnapshots: true })
     }));
     fireEvent.click(screen.getByText('Reset defaults'));
     expect(screen.getByText('Commentary is ready.')).toBeTruthy();
@@ -320,5 +321,19 @@ describe('ShareApp', () => {
     render(<ShareApp />);
     expect(await screen.findByText('No match session was supplied.')).toBeTruthy();
     expect(screen.getByText(/No session supplied/)).toBeTruthy();
+  });
+
+  it('retries result snapshots until both player images are available', async () => {
+    history.replaceState({}, '', '/share.html?session=match-retry&winner=draw');
+    api.getSnapshot
+      .mockResolvedValueOnce({ success: false })
+      .mockResolvedValueOnce({ success: false })
+      .mockResolvedValueOnce({ success: true, image: 'https://img.test/retry-p1.jpg' })
+      .mockResolvedValueOnce({ success: true, image: 'https://img.test/retry-p2.jpg' });
+    const { ShareApp } = await import('../pages/ShareApp');
+    render(<ShareApp />);
+    expect(await screen.findByText('Loading player captures…')).toBeTruthy();
+    expect(await screen.findByAltText('Player 1 match capture', {}, { timeout: 2000 })).toBeTruthy();
+    expect(screen.getByAltText('Player 2 match capture')).toBeTruthy();
   });
 });

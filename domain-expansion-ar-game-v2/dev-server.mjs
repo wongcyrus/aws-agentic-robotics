@@ -29,7 +29,6 @@ const vite = await createViteServer({
   },
   appType: 'mpa'
 });
-server.on('request', vite.middlewares);
 const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (request, socket, head) => {
   const pathname = new URL(
@@ -41,7 +40,81 @@ server.on('upgrade', (request, socket, head) => {
     wss.emit('connection', webSocket, request);
   });
 });
-const clients = new Map(), rooms = new Map();
+const clients = new Map(), rooms = new Map(), snapshots = new Map();
+const json = (response, status, body) => {
+  response.writeHead(status, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify(body));
+};
+const readJson = (request) => new Promise((resolveBody, reject) => {
+  let body = '';
+  request.setEncoding('utf8');
+  request.on('data', (chunk) => {
+    body += chunk;
+    if (body.length > 10_000_000) reject(new Error('Request body exceeds 10 MB'));
+  });
+  request.on('end', () => {
+    try { resolveBody(body ? JSON.parse(body) : {}); } catch (error) { reject(error); }
+  });
+  request.on('error', reject);
+});
+const handleApi = async (request, response) => {
+  const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+  if (!url.pathname.startsWith('/api/')) return false;
+  try {
+    if (request.method === 'POST' && url.pathname === '/api/webcam-upload') {
+      const { sessionId, role, phase, image } = await readJson(request);
+      if (!sessionId || !['player1', 'player2'].includes(role) || !['START', 'END'].includes(phase) ||
+          typeof image !== 'string' || !image.startsWith('data:image/')) {
+        json(response, 400, { success: false, message: 'Invalid snapshot payload' });
+        return true;
+      }
+      snapshots.set(`${sessionId}:${role}:${phase}`, image);
+      json(response, 200, { success: true });
+      return true;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/get-snapshot') {
+      const sessionId = url.searchParams.get('sessionId');
+      const role = url.searchParams.get('role');
+      if (!sessionId || !['player1', 'player2'].includes(role ?? '')) {
+        json(response, 400, { success: false, message: 'Invalid snapshot request' });
+        return true;
+      }
+      const image = snapshots.get(`${sessionId}:${role}:END`) ?? snapshots.get(`${sessionId}:${role}:START`);
+      json(response, 200, image
+        ? { success: true, image }
+        : { success: false, message: 'Snapshot not available yet' });
+      return true;
+    }
+    if (request.method === 'POST' && ['/api/register-room', '/api/trigger-technique'].includes(url.pathname)) {
+      await readJson(request);
+      json(response, 200, { success: true });
+      return true;
+    }
+    if (request.method === 'POST' && ['/api/live-status', '/api/battle-result'].includes(url.pathname)) {
+      await readJson(request);
+      json(response, 200, { commentary: 'Commentary is ready.' });
+      return true;
+    }
+    if (url.pathname === '/api/enhance-portrait' || url.pathname === '/api/check-enhancement') {
+      json(response, 200, { success: false, status: 'NONE' });
+      return true;
+    }
+    json(response, 404, { success: false, message: 'Unknown local API route' });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Local API request failed';
+    json(response, message.includes('10 MB') ? 413 : 400, { success: false, message });
+    return true;
+  }
+};
+server.on('request', (request, response) => {
+  void handleApi(request, response).then((handled) => {
+    if (!handled) vite.middlewares(request, response);
+  }).catch((error) => {
+    console.error('Local API handler failed', error);
+    if (!response.headersSent) json(response, 500, { success: false, message: 'Local API handler failed' });
+  });
+});
 const techniques = [
   'Unlimited Void', 'Malevolent Shrine', 'Self-Embodiment of Perfection', 'Authentic Mutual Love',
   'Idle Death Gamble', 'Yuji Itadori', 'Chimera Shadow Garden', 'Time Cell Moon Palace',

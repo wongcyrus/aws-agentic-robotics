@@ -58,6 +58,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const submittedChallenge = useRef<string | null>(null);
   const submittedSoloTarget = useRef<string | null>(null);
   const capturedPhase = useRef<string | null>(null);
+  const capturingPhase = useRef<string | null>(null);
   const player = state?.players[settings.role] ?? null;
   const battleTarget = state ? targetFor(state, settings.role) : null;
   const battleDeadline = state ? deadlineFor(state, settings.role) : null;
@@ -246,13 +247,28 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     if (!state?.matchId || !canvasRef.current || !cameraRef.current || !api || !state.config.captureSnapshots) return;
     const phase = state.phase === 'countdown' ? 'START' : state.phase === 'ended' ? 'END' : null;
     const captureKey = phase ? `${state.matchId}:${phase}` : null;
-    if (!phase || capturedPhase.current === captureKey) return;
-    capturedPhase.current = captureKey;
-    void api.uploadSnapshot(state.matchId, settings.role, phase, canvasRef.current.toDataURL('image/jpeg', .82)).catch((error) => {
-      console.warn('Snapshot upload failed', error);
-      setCameraStatus(error instanceof Error ? error.message : text.snapshotFailed);
-    });
-  }, [api, cameraStatus, settings.role, state?.config.captureSnapshots, state?.matchId, state?.phase]);
+    if (!phase || capturedPhase.current === captureKey || capturingPhase.current === captureKey) return;
+    const matchId = state.matchId;
+    capturingPhase.current = captureKey;
+    const image = canvasRef.current.toDataURL('image/jpeg', .82);
+    void (async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+          await api.uploadSnapshot(matchId, settings.role, phase, image);
+          capturedPhase.current = captureKey;
+          capturingPhase.current = null;
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+      capturingPhase.current = null;
+      console.warn('Snapshot upload failed', lastError);
+      setCameraStatus(lastError instanceof Error ? lastError.message : text.snapshotFailed);
+    })();
+  }, [api, settings.role, state?.config.captureSnapshots, state?.matchId, state?.phase, text.snapshotFailed]);
 
   useEffect(() => {
     if (settings.playerMode === 'battle') setMediaSrc(null);

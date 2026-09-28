@@ -43,8 +43,10 @@ Open:
 
 The development server automatically reuses `cert.pem` and `key.pem` from the
 V1 project when they are available. The local WebSocket URL follows the page
-protocol, so HTTPS uses `wss://localhost:5173/control`. To use different
-certificates:
+protocol, so HTTPS uses `wss://localhost:5173/control`. It also provides
+same-origin local snapshot upload/download endpoints so the embedded Scroll of
+Honor can display both player captures without a separate REST server. To use
+different certificates:
 
 ```bash
 VITE_HTTPS_CERT=/absolute/path/to/cert.pem \

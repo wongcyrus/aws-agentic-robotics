@@ -331,6 +331,10 @@ async function configureContext(
   );
   await context.route('**/api/**', (route) => {
     if (route.request().resourceType() === 'websocket') return route.continue();
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/webcam-upload' || pathname === '/api/get-snapshot') {
+      return route.continue();
+    }
     return route.fulfill({
       status: 200,
       contentType: 'application/json',

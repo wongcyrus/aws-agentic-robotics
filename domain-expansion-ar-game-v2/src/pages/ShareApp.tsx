@@ -52,18 +52,38 @@ export function ShareApp({
       if (!sessionId) setSnapshotMessage(text.noMatchSession);
       return;
     }
-    void Promise.all((['player1', 'player2'] as const).map(async (role) => {
-      const result = await api.getSnapshot(sessionId, role);
-      return [role, result.image || ''] as const;
-    })).then((entries) => {
-      const available = Object.fromEntries(entries.filter(([, image]) => image)) as SnapshotState;
-      setSnapshots(available);
-      setSnapshotMessage(Object.keys(available).length ? '' : text.capturesUnavailable);
-    }).catch((error) => {
-      console.error('Snapshot loading failed', error);
-      setSnapshotMessage(error instanceof Error ? error.message : text.loadCapturesFailed);
-    });
-  }, [api, sessionId]);
+    let cancelled = false;
+    void (async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 12 && !cancelled; attempt += 1) {
+        try {
+          const entries = await Promise.all((['player1', 'player2'] as const).map(async (role) => {
+            const result = await api.getSnapshot(sessionId, role);
+            return [role, result.image || ''] as const;
+          }));
+          const available = Object.fromEntries(entries.filter(([, image]) => image)) as SnapshotState;
+          if (cancelled) return;
+          setSnapshots(available);
+          if (Object.keys(available).length === 2) {
+            setSnapshotMessage('');
+            return;
+          }
+          setSnapshotMessage(text.loadingCaptures);
+        } catch (error) {
+          lastError = error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+      if (cancelled) return;
+      if (lastError) {
+        console.error('Snapshot loading failed', lastError);
+        setSnapshotMessage(lastError instanceof Error ? lastError.message : text.loadCapturesFailed);
+      } else {
+        setSnapshotMessage(text.capturesUnavailable);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api, sessionId, text]);
 
   const pollEnhancement = useCallback(async () => {
     if (!api || !sessionId) return;
