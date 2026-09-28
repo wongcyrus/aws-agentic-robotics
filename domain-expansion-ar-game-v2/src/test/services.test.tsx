@@ -157,6 +157,24 @@ describe('configuration, commentary and auth gate', () => {
     await player.play({ commentary: 'ignored' }, { ...defaultSettings, commentatorEnabled: false });
   });
 
+  it('starts browser lip sync without waiting for the speech onstart event', async () => {
+    const speakingChanges: boolean[] = [];
+    vi.stubGlobal('speechSynthesis', {
+      cancel: vi.fn(),
+      speak: vi.fn(),
+      getVoices: vi.fn(() => [])
+    });
+    vi.stubGlobal('SpeechSynthesisUtterance', class {
+      lang = ''; volume = 0; voice: unknown = null;
+      constructor(public text: string) {}
+    });
+    const player = new CommentaryPlayer((speaking) => speakingChanges.push(speaking));
+
+    await player.play({ commentary: 'Opening message' }, defaultSettings);
+
+    expect(speakingChanges.at(-1)).toBe(true);
+  });
+
   it('exposes the active AWS audio clock and clears it when playback ends', async () => {
     vi.stubGlobal('speechSynthesis', { cancel: vi.fn() });
     let audioInstance: {
@@ -192,6 +210,64 @@ describe('configuration, commentary and auth gate', () => {
     await player.waitForPlayback();
     expect(playbackFinished).toBe(true);
     expect(audioChanges.at(-1)).toBeUndefined();
+    expect(speakingChanges.at(-1)).toBe(false);
+  });
+
+  it('finishes playback on AWS audio errors and cleans up active audio when stopped', async () => {
+    vi.stubGlobal('speechSynthesis', { cancel: vi.fn() });
+    let audioInstance: {
+      onerror?: () => void;
+      pause: ReturnType<typeof vi.fn>;
+      removeAttribute: ReturnType<typeof vi.fn>;
+      load: ReturnType<typeof vi.fn>;
+    } | undefined;
+    vi.stubGlobal('Audio', class {
+      volume = 0; paused = false; ended = false; currentTime = 0;
+      onplay?: () => void; onended?: () => void; onerror?: () => void;
+      pause = vi.fn(); removeAttribute = vi.fn(); load = vi.fn();
+      play = vi.fn().mockResolvedValue(undefined);
+      constructor() { audioInstance = this; }
+    });
+    const player = new CommentaryPlayer();
+    await player.play({ commentary: 'Status', ttsMode: 'aws', audioUrl: '/speech.mp3' }, defaultSettings);
+    audioInstance?.onerror?.();
+    await player.waitForPlayback();
+    await player.play({ commentary: 'Status', ttsMode: 'aws', audioUrl: '/speech.mp3' }, defaultSettings);
+    const activeAudio = audioInstance;
+    player.stop();
+    expect(activeAudio?.pause).toHaveBeenCalled();
+    expect(activeAudio?.removeAttribute).toHaveBeenCalledWith('src');
+    expect(activeAudio?.load).toHaveBeenCalled();
+  });
+
+  it('resolves browser speech playback on completion and error', async () => {
+    let utterance: {
+      onstart?: () => void;
+      onend?: () => void;
+      onerror?: () => void;
+    } | undefined;
+    vi.stubGlobal('speechSynthesis', {
+      cancel: vi.fn(),
+      speak: vi.fn(),
+      getVoices: vi.fn(() => [])
+    });
+    vi.stubGlobal('SpeechSynthesisUtterance', class {
+      lang = ''; volume = 0; voice: unknown = null;
+      onstart?: () => void; onend?: () => void; onerror?: () => void;
+      constructor(public text: string) { utterance = this; }
+    });
+    const speakingChanges: boolean[] = [];
+    const player = new CommentaryPlayer((speaking) => speakingChanges.push(speaking));
+
+    await player.play({ commentary: 'First' }, defaultSettings);
+    utterance?.onstart?.();
+    utterance?.onend?.();
+    await player.waitForPlayback();
+    expect(speakingChanges.at(-1)).toBe(false);
+
+    await player.play({ commentary: 'Second' }, defaultSettings);
+    utterance?.onerror?.();
+    await player.waitForPlayback();
     expect(speakingChanges.at(-1)).toBe(false);
   });
 

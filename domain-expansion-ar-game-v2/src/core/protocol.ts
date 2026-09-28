@@ -83,7 +83,8 @@ export type WebRtcPayload = z.infer<typeof WebRtcPayloadSchema>;
 
 export const CommandTypeSchema = z.enum([
   'match.start', 'match.beginCountdown', 'match.countdownCompleted', 'match.reset',
-  'challenge.succeeded', 'challenge.timedOut', 'resolution.complete', 'cinematic.completed'
+  'challenge.succeeded', 'challenge.timedOut', 'challenge.expire',
+  'resolution.complete', 'cinematic.completed'
 ]);
 export type CommandType = z.infer<typeof CommandTypeSchema>;
 

@@ -400,6 +400,8 @@ const techniques = [
   'Idle Death Gamble', 'Yuji Itadori', 'Chimera Shadow Garden', 'Time Cell Moon Palace',
   'Lapse Blue', 'Reversal Red', 'Hollow Purple'
 ];
+const MAX_RECOGNITION_DELIVERY_DELAY_MS = 1500;
+const MAX_RECOGNITION_CLOCK_SKEW_MS = 250;
 let e2eShuffleIndex = 0;
 const id = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const emptyPlayer = () => ({ connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null });
@@ -538,7 +540,14 @@ wss.on('connection', (ws) => {
     } else if (command.messageType === 'challenge.succeeded' && (client.role === 'player1' || client.role === 'player2') && (state.phase === 'playing' || state.phase === 'resolving')) {
       const player = state.players[client.role];
       if (state.phase === 'resolving' && Date.now() > state.resolution.acceptUntil) return;
-      if (player.challenge?.challengeId !== payload.challengeId || player.challenge.technique !== payload.technique || (player.challenge.deadlineAt && Date.now() > player.challenge.deadlineAt)) return;
+      if (player.challenge?.challengeId !== payload.challengeId || player.challenge.technique !== payload.technique) return;
+      const receivedAt = Date.now();
+      const recognizedAt = payload.recognizedAt == null ? receivedAt : payload.recognizedAt;
+      if (!Number.isFinite(recognizedAt) ||
+        recognizedAt < player.challenge.startedAt ||
+        recognizedAt > receivedAt + MAX_RECOGNITION_CLOCK_SKEW_MS ||
+        receivedAt - recognizedAt > MAX_RECOGNITION_DELIVERY_DELAY_MS ||
+        (player.challenge.deadlineAt && recognizedAt > player.challenge.deadlineAt)) return;
       if (state.phase === 'playing') {
         pauseChallenges(state); state.phase = 'resolving';
         state.resolution = { resolutionId: id('resolution'), acceptUntil: Date.now() + state.config.scoreGraceMs, casts: [] };
@@ -551,6 +560,14 @@ wss.on('connection', (ws) => {
       player.attempted += 1; player.challenge = null;
       const winner = evaluateWinner(state);
       if (winner) { state.winner = winner; state.phase = 'ended'; } else assignChallenge(state, client.role);
+    } else if (command.messageType === 'challenge.expire' && client.role === 'viewer' &&
+      state.controllerClientId === client.clientId && state.phase === 'playing' &&
+      ['player1', 'player2'].includes(payload.role)) {
+      const player = state.players[payload.role];
+      if (player.challenge?.challengeId !== payload.challengeId || Date.now() < player.challenge.deadlineAt) return;
+      player.attempted += 1; player.challenge = null;
+      const winner = evaluateWinner(state);
+      if (winner) { state.winner = winner; state.phase = 'ended'; } else assignChallenge(state, payload.role);
     } else if (command.messageType === 'resolution.complete' && client.role === 'viewer' && state.phase === 'resolving' && Date.now() >= state.resolution.acceptUntil) {
       state.pendingWinner = evaluateWinner(state);
       state.cinematic = {

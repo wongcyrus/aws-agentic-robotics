@@ -74,11 +74,13 @@ export class CommentaryPlayer {
       this.audio.onerror = finishAudio;
       try {
         await this.audio.play();
+        this.onSpeakingChange(true);
         return;
       } catch {
         finishPlayback();
         this.audio = undefined;
         this.onAudioChange(undefined);
+        this.onSpeakingChange(false);
       }
     }
 
@@ -100,6 +102,7 @@ export class CommentaryPlayer {
     if (settings.commentaryVoice !== 'auto') {
       utterance.voice = speechSynthesis.getVoices().find(({ name }) => name === settings.commentaryVoice) ?? null;
     }
+    this.onSpeakingChange(true);
     speechSynthesis.speak(utterance);
   }
 }

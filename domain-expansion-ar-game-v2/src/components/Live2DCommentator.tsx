@@ -106,11 +106,13 @@ function fitModel(model: Live2DModel) {
 export function Live2DCommentator({
   audioElement,
   speaking,
-  size
+  size,
+  foreground = false
 }: {
   audioElement?: HTMLAudioElement;
   speaking: boolean;
   size: number;
+  foreground?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const speakingRef = useRef(speaking);
@@ -185,7 +187,7 @@ export function Live2DCommentator({
   }, []);
 
   return <div
-    className={`live2d-avatar ${speaking ? 'speaking' : ''}`}
+    className={`live2d-avatar ${speaking ? 'speaking' : ''} ${foreground ? 'foreground' : ''}`}
     style={{ width: size, height: size }}
   >
     <canvas ref={canvasRef} />

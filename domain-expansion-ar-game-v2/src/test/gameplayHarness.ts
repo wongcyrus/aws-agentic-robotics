@@ -76,7 +76,8 @@ export class InMemoryGameCoordinator {
       },
       command: this.commandFunctions.get(role)!,
       signal: this.signalFunctions.get(role)!,
-      subscribe: () => () => undefined
+      subscribe: () => () => undefined,
+      serverTime: (clientTime = Date.now()) => clientTime
     };
   }
 
@@ -108,8 +109,18 @@ export class InMemoryGameCoordinator {
       this.beginRound();
       return;
     }
-    if (type === 'challenge.succeeded' || type === 'challenge.timedOut') {
+    if (type === 'challenge.succeeded') {
       record.accepted = this.terminal(role, type, payload);
+      return;
+    }
+    if (type === 'challenge.timedOut') {
+      record.accepted = this.terminal(role, type, payload);
+      return;
+    }
+    if (type === 'challenge.expire') {
+      const expiredRole = payload.role;
+      if (role !== 'viewer' || (expiredRole !== 'player1' && expiredRole !== 'player2')) return;
+      record.accepted = this.timeout(expiredRole, payload);
       return;
     }
     if (type === 'resolution.complete') {
@@ -211,6 +222,52 @@ export class InMemoryGameCoordinator {
       resolution: { ...resolution, casts },
       players: { ...this.state.players, [role]: updatedPlayer }
     });
+    return true;
+  }
+
+  private timeout(role: Role, payload: Record<string, unknown>) {
+    if (!this.state || role === 'viewer' || this.state.phase !== 'playing') return false;
+    const challenge = this.state.players[role].challenge;
+    if (!challenge || payload.challengeId !== challenge.challengeId ||
+      this.terminalChallenges.has(challenge.challengeId) ||
+      Date.now() < (challenge.deadlineAt ?? Infinity)) return false;
+    this.terminalChallenges.add(challenge.challengeId);
+    const attempted = this.state.players[role].attempted + 1;
+    const count = this.state.config.challengeCount;
+    const players = {
+      ...this.state.players,
+      [role]: {
+        ...this.state.players[role],
+        attempted,
+        finished: attempted >= count,
+        challenge: null
+      }
+    };
+    const p1Max = players.player1.score + Math.max(0, count - players.player1.attempted);
+    const p2Max = players.player2.score + Math.max(0, count - players.player2.attempted);
+    const winner = players.player1.finished && players.player2.finished
+      ? players.player1.score === players.player2.score
+        ? 'DRAW'
+        : players.player1.score > players.player2.score ? 'PLAYER 1' : 'PLAYER 2'
+      : players.player1.score > p2Max
+        ? 'PLAYER 1'
+        : players.player2.score > p1Max ? 'PLAYER 2' : null;
+    if (winner) {
+      this.update({ players, winner, phase: 'ended' });
+      return true;
+    }
+    const technique = this.queues[role][attempted]?.[0];
+    if (technique) {
+      const startedAt = Date.now();
+      players[role].challenge = {
+        challengeId: `${this.state.matchId}:${attempted}:${role}`,
+        technique,
+        startedAt,
+        deadlineAt: startedAt + this.state.config.difficultySeconds * 1000,
+        pausedRemainingMs: null
+      };
+    }
+    this.update({ players });
     return true;
   }
 

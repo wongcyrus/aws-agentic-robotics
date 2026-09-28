@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import random
 import time
 import uuid
@@ -32,6 +33,8 @@ TECHNIQUES = [
 ]
 PLAYER_ROLES = {"player1", "player2"}
 MAX_STATE_WRITE_ATTEMPTS = 3
+MAX_RECOGNITION_DELIVERY_DELAY_MS = 1500
+MAX_RECOGNITION_CLOCK_SKEW_MS = 250
 
 
 class ConcurrentStateUpdate(RuntimeError):
@@ -54,6 +57,26 @@ def _now_ms(clock: Callable[[], float]) -> int:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _recognized_at(
+    payload: dict[str, Any], challenge: dict[str, Any], now_ms: int
+) -> int:
+    value = payload.get("recognizedAt")
+    if value is None:
+        return now_ms
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise _command_error("Recognition timestamp is invalid")
+    if not math.isfinite(float(value)):
+        raise _command_error("Recognition timestamp is invalid")
+    recognized_at = int(value)
+    if recognized_at < int(challenge["startedAt"]):
+        raise _command_error("Recognition predates the active challenge")
+    if recognized_at > now_ms + MAX_RECOGNITION_CLOCK_SKEW_MS:
+        raise _command_error("Recognition timestamp is in the future")
+    if now_ms - recognized_at > MAX_RECOGNITION_DELIVERY_DELAY_MS:
+        raise _command_error("Recognition result arrived too late")
+    return recognized_at
 
 
 def _room_key(room_id: str) -> str:
@@ -308,7 +331,8 @@ def _apply_command(
         challenge = player.get("challenge")
         if not challenge or challenge["challengeId"] != payload.get("challengeId"):
             raise _command_error("Challenge is stale or does not belong to player")
-        if challenge.get("deadlineAt") and now_ms > int(challenge["deadlineAt"]):
+        recognized_at = _recognized_at(payload, challenge, now_ms)
+        if challenge.get("deadlineAt") and recognized_at > int(challenge["deadlineAt"]):
             raise _command_error("Challenge deadline has passed")
         if payload.get("technique") != challenge["technique"]:
             raise _command_error("Technique does not match active challenge")
@@ -338,7 +362,19 @@ def _apply_command(
         _require_phase(state, "playing")
         if role not in PLAYER_ROLES:
             raise _command_error("Only players can time out challenges")
-        player = state["players"][role]
+        timed_out_role = role
+    elif command_type == "challenge.expire":
+        _require_phase(state, "playing")
+        if role != "viewer" or state.get("controllerClientId") != client_id:
+            raise _command_error("Only the controlling viewer can expire challenges")
+        timed_out_role = str(payload.get("role") or "")
+        if timed_out_role not in PLAYER_ROLES:
+            raise _command_error("Challenge expiry player is invalid")
+    else:
+        timed_out_role = None
+
+    if timed_out_role:
+        player = state["players"][timed_out_role]
         challenge = player.get("challenge")
         if not challenge or challenge["challengeId"] != payload.get("challengeId"):
             raise _command_error("Challenge is stale or does not belong to player")
@@ -351,7 +387,7 @@ def _apply_command(
             state["winner"] = winner
             state["phase"] = "ended"
         else:
-            _assign_challenge(state, role, now_ms)
+            _assign_challenge(state, timed_out_role, now_ms)
         return
 
     if command_type == "resolution.complete":

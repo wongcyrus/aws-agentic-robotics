@@ -685,6 +685,199 @@ def test_score_grace_deadlines_and_stale_commands_are_rejected():
     assert late["body"] == "Score grace window has closed"
 
 
+def test_recognition_before_deadline_scores_after_short_delivery_delay():
+    connections = ConnectionsTable()
+    sessions = SessionsTable()
+    api = ApiClient()
+    match_id = start_playing(connections, sessions, api)
+    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+
+    response = command(
+        "challenge.succeeded",
+        {
+            "challengeId": challenge["challengeId"],
+            "technique": challenge["technique"],
+            "recognizedAt": 107900,
+        },
+        "p1",
+        connections,
+        sessions,
+        api,
+        message_id="delayed-recognition",
+        match_id=match_id,
+        now=108.4,
+    )
+
+    assert response["statusCode"] == 200
+    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 1
+
+
+@pytest.mark.parametrize("recognized_at", ["107900", True, float("nan"), float("inf")])
+def test_invalid_recognition_timestamps_are_rejected(recognized_at):
+    connections = ConnectionsTable()
+    sessions = SessionsTable()
+    api = ApiClient()
+    match_id = start_playing(connections, sessions, api)
+    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+
+    response = command(
+        "challenge.succeeded",
+        {
+            "challengeId": challenge["challengeId"],
+            "technique": challenge["technique"],
+            "recognizedAt": recognized_at,
+        },
+        "p1",
+        connections,
+        sessions,
+        api,
+        message_id="invalid-recognition",
+        match_id=match_id,
+        now=107.9,
+    )
+
+    assert response["statusCode"] == 400
+    assert response["body"] == "Recognition timestamp is invalid"
+    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 0
+
+
+@pytest.mark.parametrize(
+    ("recognized_at", "now", "reason"),
+    [
+        (99_999, 100.0, "Recognition predates the active challenge"),
+        (108_200, 107.9, "Recognition timestamp is in the future"),
+        (106_000, 107.6, "Recognition result arrived too late"),
+    ],
+)
+def test_out_of_window_recognition_timestamps_are_rejected(
+    recognized_at, now, reason
+):
+    connections = ConnectionsTable()
+    sessions = SessionsTable()
+    api = ApiClient()
+    match_id = start_playing(connections, sessions, api)
+    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+
+    response = command(
+        "challenge.succeeded",
+        {
+            "challengeId": challenge["challengeId"],
+            "technique": challenge["technique"],
+            "recognizedAt": recognized_at,
+        },
+        "p1",
+        connections,
+        sessions,
+        api,
+        message_id=f"recognition-{recognized_at}",
+        match_id=match_id,
+        now=now,
+    )
+
+    assert response["statusCode"] == 400
+    assert response["body"] == reason
+    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 0
+
+
+@pytest.mark.parametrize(
+    ("connection_id", "payload", "now", "reason"),
+    [
+        (
+            "viewer2",
+            {"role": "player1"},
+            108.0,
+            "Only the controlling viewer can expire challenges",
+        ),
+        (
+            "viewer",
+            {"role": "spectator"},
+            108.0,
+            "Challenge expiry player is invalid",
+        ),
+        (
+            "viewer",
+            {"role": "player1"},
+            107.9,
+            "Challenge deadline has not passed",
+        ),
+    ],
+)
+def test_challenge_expiry_validation(connection_id, payload, now, reason):
+    connections = ConnectionsTable()
+    sessions = SessionsTable()
+    api = ApiClient()
+    match_id = start_playing(connections, sessions, api)
+    join("viewer", "viewer2", connections, sessions, api, client_id="viewer-2")
+    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+
+    response = command(
+        "challenge.expire",
+        {**payload, "challengeId": challenge["challengeId"]},
+        connection_id,
+        connections,
+        sessions,
+        api,
+        message_id=f"expire-validation-{connection_id}-{reason}",
+        match_id=match_id,
+        now=now,
+    )
+
+    assert response["statusCode"] == 400
+    assert response["body"] == reason
+    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["attempted"] == 0
+
+
+def test_challenge_expiry_rejects_stale_challenge():
+    connections = ConnectionsTable()
+    sessions = SessionsTable()
+    api = ApiClient()
+    match_id = start_playing(connections, sessions, api)
+
+    response = command(
+        "challenge.expire",
+        {"role": "player1", "challengeId": "stale"},
+        "viewer",
+        connections,
+        sessions,
+        api,
+        message_id="expire-stale",
+        match_id=match_id,
+        now=108.0,
+    )
+
+    assert response["statusCode"] == 400
+    assert response["body"] == "Challenge is stale or does not belong to player"
+
+
+def test_controlling_viewer_expires_backgrounded_player_challenges():
+    connections = ConnectionsTable()
+    sessions = SessionsTable()
+    api = ApiClient()
+    match_id = start_playing(connections, sessions, api)
+    state = sessions.items["v2-room:ROOM"]
+
+    for role in ("player1", "player2"):
+        challenge = state["players"][role]["challenge"]
+        response = command(
+            "challenge.expire",
+            {"role": role, "challengeId": challenge["challengeId"]},
+            "viewer",
+            connections,
+            sessions,
+            api,
+            message_id=f"expire-{role}",
+            match_id=match_id,
+            now=108.0,
+        )
+        assert response["statusCode"] == 200
+        state = sessions.items["v2-room:ROOM"]
+
+    assert state["phase"] == "ended"
+    assert state["winner"] == "DRAW"
+    assert state["players"]["player1"]["attempted"] == 1
+    assert state["players"]["player2"]["attempted"] == 1
+
+
 def test_resolution_cinematic_reset_and_authorization_lifecycle():
     connections = ConnectionsTable()
     sessions = SessionsTable()

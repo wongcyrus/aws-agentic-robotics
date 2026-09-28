@@ -17,6 +17,20 @@ const extended = (indices: number[]) => {
   }
   return value;
 };
+const timeCellHand = (x: number) => {
+  const value = hand();
+  value[0] = { x, y: .6 };
+  value[4] = { x: x - .08, y: .35 };
+  value[5] = { x: x + .02, y: .5 };
+  value[6] = { x: x + .02, y: .4 };
+  value[8] = { x: x + .02, y: .2 };
+  for (const [mcp, pip, tip] of [[9, 10, 12], [13, 14, 16], [17, 18, 20]]) {
+    value[mcp] = { x: x + mcp * .002, y: .5 };
+    value[pip] = { x: x + mcp * .002, y: .48 };
+    value[tip] = { x: x + mcp * .002, y: .55 };
+  }
+  return value;
+};
 
 describe('gesture recognition', () => {
   it('recognizes single and combined techniques', () => {
@@ -39,6 +53,14 @@ describe('gesture recognition', () => {
     expect(recognizer.update([extended([8])])).toBe('Lapse Blue');
     for (let index = 0; index < 6; index++) recognizer.update([]);
     expect(recognizer.update([])).toBeNull();
+  });
+
+  it('recognizes and stabilizes Time Cell Moon Palace', () => {
+    const hands = [timeCellHand(.35), timeCellHand(.65)];
+    expect(detectGesture(hands)).toBe('Time Cell Moon Palace');
+    const recognizer = new StableGestureRecognizer();
+    for (let index = 0; index < 5; index++) expect(recognizer.update(hands)).toBeNull();
+    expect(recognizer.update(hands)).toBe('Time Cell Moon Palace');
   });
 });
 

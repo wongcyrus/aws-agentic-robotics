@@ -25,6 +25,7 @@ export function useGameSession(roomId: string, role: Role) {
   const transport = useRef<WebSocketControlTransport | null>(null);
   const listeners = useRef(new Set<(message: ServerEnvelope) => void>());
   const stateRef = useRef<MatchState | null>(null);
+  const serverClockOffset = useRef<number | null>(null);
   stateRef.current = state;
 
   useEffect(() => {
@@ -35,6 +36,10 @@ export function useGameSession(roomId: string, role: Role) {
       const control = new WebSocketControlTransport(loaded.webSocketUrl, new LocalStorageTokenProvider());
       transport.current = control;
       control.subscribe((message) => {
+        const observedOffset = message.sentAt - Date.now();
+        serverClockOffset.current = serverClockOffset.current == null
+          ? observedOffset
+          : Math.max(serverClockOffset.current, observedOffset);
         listeners.current.forEach((listener) => listener(message));
         if (message.messageType === 'room.snapshot') {
           setState((current) => acceptState(current, message.payload.state));
@@ -63,5 +68,7 @@ export function useGameSession(roomId: string, role: Role) {
     listeners.current.add(listener);
     return () => { listeners.current.delete(listener); };
   }, []);
-  return { state, status, config, command, signal, subscribe };
+  const serverTime = useCallback((clientTime = Date.now()) =>
+    clientTime + (serverClockOffset.current ?? 0), []);
+  return { state, status, config, command, signal, subscribe, serverTime };
 }

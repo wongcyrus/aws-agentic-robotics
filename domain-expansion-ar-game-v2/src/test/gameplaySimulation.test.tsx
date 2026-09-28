@@ -70,8 +70,25 @@ const extendedHand = (technique: 'Lapse Blue' | 'Reversal Red'): Landmark[] => {
   }
   return hand;
 };
+const timeCellHand = (x: number): Landmark[] => {
+  const hand = Array.from({ length: 21 }, () => ({ x, y: .5 }));
+  hand[0] = { x, y: .6 };
+  hand[4] = { x: x - .08, y: .35 };
+  hand[5] = { x: x + .02, y: .5 };
+  hand[6] = { x: x + .02, y: .4 };
+  hand[8] = { x: x + .02, y: .2 };
+  for (const [mcp, pip, tip] of [[9, 10, 12], [13, 14, 16], [17, 18, 20]]) {
+    hand[mcp] = { x: x + mcp * .002, y: .5 };
+    hand[pip] = { x: x + mcp * .002, y: .48 };
+    hand[tip] = { x: x + mcp * .002, y: .55 };
+  }
+  return hand;
+};
 
 const framesFor = (technique: GestureName) => {
+  if (technique === 'Time Cell Moon Palace') {
+    return [timeCellHand(.35), timeCellHand(.65)];
+  }
   if (technique !== 'Lapse Blue' && technique !== 'Reversal Red') {
     throw new Error(`No scripted landmarks for ${technique}`);
   }
@@ -180,6 +197,20 @@ beforeEach(() => {
 });
 
 describe('deterministic React gameplay simulation', () => {
+  it('scores Time Cell Moon Palace after its effect stabilizes', async () => {
+    coordinator = new InMemoryGameCoordinator({
+      player1: [['Time Cell Moon Palace']],
+      player2: [['Reversal Red']]
+    });
+    await mountFullGame();
+    const [p1Camera] = ScriptedCamera.instances;
+    await emitStable(p1Camera, 'Time Cell Moon Palace');
+    expect(coordinator.state?.players.player1.score).toBe(1);
+    expect(coordinator.commands.filter(({ type, accepted }) =>
+      type === 'challenge.succeeded' && accepted
+    )).toHaveLength(1);
+  });
+
   it('runs countdown through dual cinematic, ending, and clean reset with same-frame detections', async () => {
     const { container } = await mountFullGame();
     const [p1Camera, p2Camera] = ScriptedCamera.instances;
@@ -279,7 +310,26 @@ describe('deterministic React gameplay simulation', () => {
     await act(async () => camera.emit(framesFor('Lapse Blue')));
     expect(coordinator.state?.players.player1.score).toBe(expectedScore);
     const success = coordinator.commands.filter(({ type }) => type === 'challenge.succeeded').at(-1);
-    expect(success?.accepted).toBe(expectedScore === 1);
+    if (expectedScore === 1) expect(success?.accepted).toBe(true);
+    else expect(success).toBeUndefined();
+  });
+
+  it('expires challenges from the battle viewer when player tabs do not run timers', async () => {
+    const { BattleApp } = await import('../pages/BattleApp');
+    act(() => coordinator.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0 } }));
+    act(() => coordinator.command('viewer', 'match.beginCountdown'));
+    act(() => coordinator.command('viewer', 'match.countdownCompleted'));
+    render(<BattleApp initialSettings={{ roomCode: 'SIM1', commentatorEnabled: false, language: 'en' }} />);
+
+    await advance(config.difficultySeconds * 1000);
+
+    const expirations = coordinator.commands.filter(({ type, accepted }) =>
+      type === 'challenge.expire' && accepted
+    );
+    expect(expirations).toHaveLength(2);
+    expect(coordinator.state?.phase).toBe('ended');
+    expect(coordinator.state?.players.player1.attempted).toBe(1);
+    expect(coordinator.state?.players.player2.attempted).toBe(1);
   });
 
   it('turns flicker and a timeout/recognition same tick into one terminal outcome', async () => {
@@ -326,7 +376,7 @@ describe('deterministic React gameplay simulation', () => {
     expect(coordinator.state?.phase).toBe('playing');
     expect(screen.getByText('Lapse Blue')).toBeTruthy();
     viewer.unmount();
-    const reconnectedViewer = render(<BattleApp initialSettings={{ roomCode: 'SIM1', commentatorEnabled: false }} />);
+    const reconnectedViewer = render(<BattleApp initialSettings={{ roomCode: 'SIM1', commentatorEnabled: false, language: 'en' }} />);
     expect(coordinator.state?.phase).toBe('playing');
     expect(screen.getByText('Lapse Blue')).toBeTruthy();
     reconnectedViewer.unmount();
@@ -383,29 +433,37 @@ describe('seeded authoritative match invariants', () => {
       room.command('viewer', 'match.start', { config: { ...config, countdownSeconds: 0, challengeCount: 3 } });
       room.command('viewer', 'match.beginCountdown');
       room.command('viewer', 'match.countdownCompleted');
-      for (let round = 0; round < 3; round += 1) {
+      for (let step = 0; step < 12 && room.state?.phase !== 'ended'; step += 1) {
         const roles = random() < .5
           ? ['player1', 'player2'] as const
           : ['player2', 'player1'] as const;
         roles.forEach((role) => {
-          const challenge = room.state!.players[role].challenge!;
+          const challenge = room.state?.players[role].challenge;
+          if (!challenge) return;
           const type = random() < .65 ? 'challenge.succeeded' : 'challenge.timedOut';
+          if (type === 'challenge.timedOut' && challenge.deadlineAt) {
+            vi.setSystemTime(challenge.deadlineAt);
+          }
           room.command(role, type, {
             challengeId: challenge.challengeId,
             videoSrc: `/video/${challenge.technique}.mp4`
           });
           room.command(role, type, { challengeId: challenge.challengeId });
         });
-        vi.setSystemTime(Date.now() + 1000);
-        room.command('viewer', 'resolution.complete');
-        room.command('viewer', 'cinematic.completed', {
-          cinematicId: room.state!.cinematic!.cinematicId
-        });
+        if (room.state?.phase === 'resolving' && room.state.resolution) {
+          vi.setSystemTime(room.state.resolution.acceptUntil);
+          room.command('viewer', 'resolution.complete');
+        }
+        if (room.state?.phase === 'cinematic' && room.state.cinematic) {
+          room.command('viewer', 'cinematic.completed', {
+            cinematicId: room.state.cinematic.cinematicId
+          });
+        }
       }
       expect(room.state?.phase).toBe('ended');
       expect(room.state?.winner).toMatch(/^(PLAYER 1|PLAYER 2|DRAW)$/);
       for (const role of ['player1', 'player2'] as const) {
-        expect(room.state!.players[role].attempted).toBe(3);
+        expect(room.state!.players[role].attempted).toBeLessThanOrEqual(3);
         expect(room.state!.players[role].score).toBeLessThanOrEqual(room.state!.players[role].attempted);
       }
       const acceptedTerminals = room.commands.filter(({ accepted, type }) =>

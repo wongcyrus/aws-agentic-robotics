@@ -36,7 +36,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     ...initialSettings
   }));
   const text = uiText(settings.language);
-  const { state, status, config, command, signal, subscribe } = useGameSession(settings.roomCode, settings.role);
+  const { state, status, config, command, signal, subscribe, serverTime } = useGameSession(settings.roomCode, settings.role);
   const connectionStatus = status in text
     ? text[status as 'loading' | 'connecting' | 'connected' | 'disconnected']
     : status;
@@ -47,6 +47,8 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const autoStartedCamera = useRef(false);
   const lastRobotActionAt = useRef(0);
   const pendingPopupMedia = useRef<string | null>(null);
+  const detectedRef = useRef<GestureName | null>(null);
+  const detectedAt = useRef<number | null>(null);
   const [cameraStatus, setCameraStatus] = useState(text.cameraStopped);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -56,7 +58,7 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
   const [feedback, setFeedback] = useState('');
   const [now, setNow] = useState(Date.now());
   const [solo, setSolo] = useState<SoloRound>(emptySoloRound);
-  const [showSettings, setShowSettings] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const submittedChallenge = useRef<string | null>(null);
   const submittedSoloTarget = useRef<string | null>(null);
   const capturedPhase = useRef<string | null>(null);
@@ -127,7 +129,11 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       await vfx.initialize();
       const onFrame = (image: CanvasImageSource, hands: Parameters<StableGestureRecognizer['update']>[0]) => {
         const stable = recognizer.update(hands);
-        setDetected(stable);
+        if (stable !== detectedRef.current) {
+          detectedRef.current = stable;
+          detectedAt.current = stable ? Date.now() : null;
+          setDetected(stable);
+        }
         vfx.draw(canvas, image, hands, stable);
       };
       try {
@@ -259,14 +265,21 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     const challenge = player?.challenge;
     const acceptingScore = state?.phase === 'playing' || (state?.phase === 'resolving' && now <= (state.resolution?.acceptUntil ?? 0));
     if (!state || !acceptingScore || !battleTarget || detected !== battleTarget || !challenge || submittedChallenge.current === challenge.challengeId) return;
+    const recognizedAt = detectedAt.current == null ? null : serverTime(detectedAt.current);
+    if (!recognizedAt || recognizedAt < challenge.startedAt || (challenge.deadlineAt && recognizedAt > challenge.deadlineAt)) return;
     const gesture = getGesture(battleTarget);
     if (!gesture) return;
     submittedChallenge.current = challenge.challengeId;
     setFeedback(text.success);
     setTimeout(() => setFeedback(''), 900);
-    command('challenge.succeeded', { challengeId: challenge.challengeId, technique: battleTarget, videoSrc: gesture.video });
+    command('challenge.succeeded', {
+      challengeId: challenge.challengeId,
+      technique: battleTarget,
+      videoSrc: gesture.video,
+      recognizedAt
+    });
     triggerRobot(battleTarget);
-  }, [battleTarget, command, detected, now, player?.challenge, settings.playerMode, solo, state]);
+  }, [battleTarget, command, detected, now, player?.challenge, serverTime, settings.playerMode, solo, state]);
 
   useEffect(() => {
     if (settings.playerMode === 'solo') {

@@ -153,17 +153,72 @@ describe('game session hook', () => {
     const { useGameSession } = await import('../services/useGameSession');
     const { result, unmount } = renderHook(() => useGameSession('ROOM', 'viewer'));
     await waitFor(() => expect(connect).toHaveBeenCalled());
+    const beforeSync = Date.now();
+    expect(result.current.serverTime(beforeSync)).toBe(beforeSync);
     act(() => statusListener('connected'));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ action: 'join', roomId: 'ROOM', role: 'viewer' }));
     act(() => result.current.command('match.reset', { reason: 'test' }, 'corr'));
     act(() => result.current.signal('viewerRequested', {}, 'player'));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ action: 'command' }));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ action: 'signal', to: 'player' }));
+    const receivedAt = Date.now();
     act(() => messageListener({
-      messageType: 'command.rejected', payload: { reason: 'late' }
+      messageType: 'command.rejected', sentAt: receivedAt + 5_000, payload: { reason: 'late' }
     }));
     expect(result.current.status).toBe('rejected: late');
+    expect(result.current.serverTime(receivedAt)).toBeGreaterThanOrEqual(receivedAt + 4_900);
+    expect(result.current.serverTime(receivedAt)).toBeLessThanOrEqual(receivedAt + 5_000);
+
+    const state = {
+      protocolVersion: '2.0', roomId: 'ROOM', matchId: null, revision: 1, phase: 'idle',
+      config: { difficultySeconds: 8, challengeCount: 11, countdownSeconds: 3, scoreGraceMs: 1000, synchronizedGestures: false, captureSnapshots: true },
+      players: {
+        player1: { connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null },
+        player2: { connected: false, clientId: null, score: 0, attempted: 0, finished: false, challenge: null }
+      },
+      countdownEndsAt: null, resolution: null, cinematic: null, winner: null, pendingWinner: null, updatedAt: receivedAt
+    };
+    const listener = vi.fn();
+    const unsubscribe = result.current.subscribe(listener);
+    act(() => messageListener({
+      protocolVersion: '2.0', messageId: 'snapshot', messageType: 'room.snapshot',
+      roomId: 'ROOM', matchId: null, revision: 1, sentAt: receivedAt + 1_000,
+      payload: { state }
+    }));
+    expect(listener).toHaveBeenCalledOnce();
+    expect(result.current.state?.revision).toBe(1);
+    expect(result.current.serverTime(receivedAt)).toBeGreaterThanOrEqual(receivedAt + 4_900);
+    unsubscribe();
+    act(() => messageListener({
+      protocolVersion: '2.0', messageId: 'ack', messageType: 'command.acknowledged',
+      roomId: 'ROOM', matchId: null, revision: 1, sentAt: receivedAt + 1_000, payload: {}
+    }));
+    expect(listener).toHaveBeenCalledOnce();
     unmount();
     expect(close).toHaveBeenCalled();
+  });
+
+  it('does not create a transport after unmounting during config loading', async () => {
+    vi.resetModules();
+    let resolveConfig: (config: { webSocketUrl: string; apiBaseUrl: string }) => void = () => undefined;
+    const config = new Promise<{ webSocketUrl: string; apiBaseUrl: string }>((resolve) => {
+      resolveConfig = resolve;
+    });
+    const connect = vi.fn();
+    vi.doMock('../services/config', () => ({ loadConfig: () => config }));
+    vi.doMock('../services/controlTransport', () => ({
+      WebSocketControlTransport: class {
+        subscribe() { return vi.fn(); }
+        subscribeStatus() { return vi.fn(); }
+        connect = connect;
+        close = vi.fn();
+      }
+    }));
+    const { useGameSession } = await import('../services/useGameSession');
+    const { unmount } = renderHook(() => useGameSession('ROOM', 'viewer'));
+    unmount();
+    resolveConfig({ webSocketUrl: 'wss://socket', apiBaseUrl: '' });
+    await Promise.resolve();
+    expect(connect).not.toHaveBeenCalled();
   });
 });

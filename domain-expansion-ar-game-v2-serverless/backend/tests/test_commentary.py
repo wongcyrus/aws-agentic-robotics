@@ -47,6 +47,10 @@ def test_translate_detail_replaces_robot_actions_and_scores():
     assert "P1 成功得分" in translated
 
 
+def test_translate_detail_preserves_empty_text():
+    assert commentary.translate_detail("") == ""
+
+
 @pytest.mark.parametrize(
     ("language", "phrase"),
     [("zh-HK", "廣東話"), ("zh-TW", "繁體中文"), ("ja", "日本語"), ("en", "English")],
@@ -99,6 +103,20 @@ def test_direct_bedrock_fallback_surfaces_failure(monkeypatch):
         commentary.direct_bedrock_fallback("prompt")
 
 
+def test_direct_bedrock_fallback_rejects_response_without_text(monkeypatch):
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(
+            converse=lambda **kwargs: {
+                "output": {"message": {"content": [{"image": {}}]}}
+            }
+        ),
+    )
+    with pytest.raises(RuntimeError, match="Direct Bedrock commentary failed"):
+        commentary.direct_bedrock_fallback("prompt")
+
+
 def test_local_direct_bypasses_agent_runtimes(monkeypatch):
     monkeypatch.setattr(
         commentary,
@@ -140,6 +158,71 @@ def test_generate_agentcore_commentary_falls_back_on_runtime_error(monkeypatch):
         ),
     )
     monkeypatch.setattr(commentary, "direct_bedrock_fallback", lambda *args, **kwargs: "fallback")
+    assert commentary.generate_ai_commentary("agentcore_runtime", "fight") == "fallback"
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (json.dumps({"output": "bytes answer"}).encode(), "bytes answer"),
+        (json.dumps({"commentary": "string answer"}), "string answer"),
+        ([b'{"message":{"content":"', "chunked answer", b'"}}'], "chunked answer"),
+        (b"plain runtime answer", "plain runtime answer"),
+        (b"{}", "Sorcerer interference detected!"),
+    ],
+)
+def test_generate_agentcore_commentary_handles_response_body_variants(
+    monkeypatch, body, expected
+):
+    client = SimpleNamespace(
+        invoke_agent_runtime=lambda **kwargs: {"response": body}
+    )
+    monkeypatch.setattr(commentary.boto3, "client", lambda *args, **kwargs: client)
+    monkeypatch.setenv("AGENTCORE_RUNTIME_ARN", "arn:runtime")
+
+    assert (
+        commentary.generate_ai_commentary(
+            "agentcore_runtime", "fight", session_id="session"
+        )
+        == expected
+    )
+
+
+def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch):
+    calls = []
+    client = SimpleNamespace(
+        invoke_agent_runtime=lambda **kwargs: calls.append(kwargs)
+        or {"response": b'{"response":"openclaw runtime answer"}'}
+    )
+    monkeypatch.setattr(commentary.boto3, "client", lambda *args, **kwargs: client)
+    monkeypatch.setenv("OPENCLAW_RUNTIME_ARN", "arn:openclaw-runtime")
+    monkeypatch.setenv("OPENCLAW_SESSION_ID", "stable-session")
+
+    result = commentary.generate_ai_commentary(
+        "openclaw",
+        "fight",
+        session_id="dynamic",
+        image_bytes_p1=b"one",
+        image_format_p1="jpg",
+        image_base64_p2="two",
+        image_format_p2="png",
+    )
+
+    assert result == "openclaw runtime answer"
+    payload = json.loads(calls[0]["payload"])
+    assert calls[0]["runtimeSessionId"].startswith("dashboard_session_")
+    assert payload["image"] != ""
+    assert payload["image_format"] == "jpeg"
+    assert payload["image_p2"] == "two"
+    assert payload["session_id"] == calls[0]["runtimeSessionId"]
+
+
+def test_generate_agentcore_without_runtime_arn_falls_back(monkeypatch):
+    monkeypatch.setattr(commentary, "AGENTCORE_RUNTIME_ARN", "")
+    monkeypatch.delenv("AGENTCORE_RUNTIME_ARN", raising=False)
+    monkeypatch.setattr(
+        commentary, "direct_bedrock_fallback", lambda *args, **kwargs: "fallback"
+    )
     assert commentary.generate_ai_commentary("agentcore_runtime", "fight") == "fallback"
 
 

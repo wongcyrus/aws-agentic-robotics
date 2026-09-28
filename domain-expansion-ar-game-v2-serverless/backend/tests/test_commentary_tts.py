@@ -40,6 +40,55 @@ def test_synthesize_retries_standard_engine(monkeypatch):
     assert calls[1]["Engine"] == "standard"
 
 
+def test_standard_voice_failure_and_missing_audio_stream_return_none(monkeypatch):
+    monkeypatch.setattr(
+        commentary_tts,
+        "polly_client",
+        SimpleNamespace(
+            synthesize_speech=lambda **kwargs: (_ for _ in ()).throw(
+                RuntimeError("unavailable")
+            )
+        ),
+    )
+    assert (
+        commentary_tts._synthesize_speech_bytes(
+            "hello", commentary_tts.get_voice_for_language("ja")
+        )
+        is None
+    )
+
+    monkeypatch.setattr(
+        commentary_tts,
+        "polly_client",
+        SimpleNamespace(synthesize_speech=lambda **kwargs: {}),
+    )
+    assert (
+        commentary_tts._synthesize_speech_bytes(
+            "hello", commentary_tts.get_voice_for_language("en")
+        )
+        is None
+    )
+
+
+def test_mp3_duration_success_and_fallbacks(monkeypatch):
+    monkeypatch.setattr(
+        commentary_tts,
+        "MP3",
+        lambda _stream: SimpleNamespace(info=SimpleNamespace(length=2.75)),
+    )
+    assert commentary_tts._calculate_mp3_duration(b"audio") == 2.75
+
+    monkeypatch.setattr(commentary_tts, "MP3", None)
+    assert commentary_tts._calculate_mp3_duration(b"audio") == 0.0
+
+    monkeypatch.setattr(
+        commentary_tts,
+        "MP3",
+        lambda _stream: (_ for _ in ()).throw(RuntimeError("invalid mp3")),
+    )
+    assert commentary_tts._calculate_mp3_duration(b"audio") == 0.0
+
+
 def test_synthesize_commentary_audio_uploads_and_returns_metadata(monkeypatch):
     put_calls = []
     monkeypatch.setattr(commentary_tts, "COMMENTARY_AUDIO_BUCKET", "bucket")
@@ -61,6 +110,46 @@ def test_synthesize_commentary_audio_uploads_and_returns_metadata(monkeypatch):
     assert put_calls[0]["Key"].endswith("room-user/fixed.mp3")
     assert result["audioUrl"] == "https://signed"
     assert result["duration"] == 1.25
+
+
+def test_synthesize_commentary_audio_handles_markdown_audio_and_s3_failures(
+    monkeypatch,
+):
+    monkeypatch.setattr(commentary_tts, "COMMENTARY_AUDIO_BUCKET", "bucket")
+    monkeypatch.setattr(
+        commentary_tts.markdown,
+        "markdown",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("bad markdown")),
+    )
+    synthesized = []
+    monkeypatch.setattr(
+        commentary_tts,
+        "_synthesize_speech_bytes",
+        lambda text, _voice: synthesized.append(text) or None,
+    )
+    assert (
+        commentary_tts.synthesize_commentary_audio("**raw**", "session", "en")
+        is None
+    )
+    assert synthesized == ["**raw**"]
+
+    monkeypatch.setattr(
+        commentary_tts, "_synthesize_speech_bytes", lambda *_args: b"audio"
+    )
+    monkeypatch.setattr(commentary_tts, "_calculate_mp3_duration", lambda _audio: 1.0)
+    monkeypatch.setattr(
+        commentary_tts,
+        "s3_client",
+        SimpleNamespace(
+            put_object=lambda **kwargs: (_ for _ in ()).throw(
+                RuntimeError("upload failed")
+            )
+        ),
+    )
+    assert (
+        commentary_tts.synthesize_commentary_audio("hello", "session", "en")
+        is None
+    )
 
 
 def test_synthesize_commentary_audio_requires_text_and_bucket(monkeypatch):

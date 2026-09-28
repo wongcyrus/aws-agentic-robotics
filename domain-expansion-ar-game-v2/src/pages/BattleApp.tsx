@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Branding } from '../components/Branding';
 import { Live2DCommentator } from '../components/Live2DCommentator';
-import { getGesture } from '../core/catalog';
+import { gestureLabel, getGesture } from '../core/catalog';
 import { remainingSeconds } from '../core/match';
 import { WebRtcSignalTypeSchema, type PlayerRole } from '../core/protocol';
 import { uiText } from '../core/uiText';
@@ -38,7 +38,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [ticker, setTicker] = useState<string[]>([]);
   const [showResultVideo, setShowResultVideo] = useState(false);
-  const [showSettings, setShowSettings] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [live2dSpeaking, setLive2dSpeaking] = useState(false);
   const [live2dAudio, setLive2dAudio] = useState<HTMLAudioElement>();
   const [openingCommentaryReadyMatchId, setOpeningCommentaryReadyMatchId] = useState<string | null>(null);
@@ -48,6 +48,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const completedCountdown = useRef<string | null>(null);
   const completedResolution = useRef<string | null>(null);
   const completedCinematic = useRef<string | null>(null);
+  const expiredChallenges = useRef(new Set<string>());
   const completedCastVideos = useRef(new Set<string>());
   const introducedMatches = useRef(new Set<string>());
   const currentState = useRef(state);
@@ -190,12 +191,24 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   }, [command, now, state?.countdownEndsAt, state?.matchId, state?.phase]);
 
   useEffect(() => {
+    if (state?.phase !== 'playing') return;
+    (['player1', 'player2'] as const).forEach((role) => {
+      const challenge = state.players[role].challenge;
+      if (!challenge?.deadlineAt || now < challenge.deadlineAt || expiredChallenges.current.has(challenge.challengeId)) return;
+      expiredChallenges.current.add(challenge.challengeId);
+      command('challenge.expire', { role, challengeId: challenge.challengeId });
+    });
+  }, [command, now, state]);
+
+  useEffect(() => {
     const resolution = state?.resolution;
     if (state?.phase !== 'resolving' || !resolution || now < resolution.acceptUntil || completedResolution.current === resolution.resolutionId) return;
     completedResolution.current = resolution.resolutionId;
     if (!narratedResolutions.current.has(resolution.resolutionId)) {
       narratedResolutions.current.add(resolution.resolutionId);
-      const detail = resolution.casts.map(({ role, technique }) => `${role === 'player1' ? 'Player 1' : 'Player 2'} activated ${technique}`).join('; ');
+      const detail = resolution.casts.map(({ role, technique }) =>
+        `${text.playerLabel(role === 'player1' ? 1 : 2)} ${text.techniqueActivated}: ${gestureLabel(technique, settings.language)}`
+      ).join('; ');
       setTicker((current) => [...current.slice(-4), detail]);
       void requestCommentary('/api/live-status', { eventType: 'CAST', detail });
     }
@@ -254,7 +267,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const playerCard = (role: PlayerRole) => {
     const player = state?.players[role];
     const technique = player?.challenge?.technique;
-    const statusLabel = technique ?? (
+    const statusLabel = gestureLabel(technique ?? null, settings.language) ?? (
       !state || state.phase === 'idle' ? text.waitingBattle :
       state.phase === 'preparing' || state.phase === 'countdown' ? text.getReady :
       state.phase === 'resolving' ? text.scoreLocked :
@@ -300,7 +313,12 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     <div className="power-bar"><span style={{ width: `${p1Score / scoreTotal * 100}%` }} /><span style={{ width: `${p2Score / scoreTotal * 100}%` }} /></div>
     <div className="battle-ticker">{ticker.slice(-3).map((entry, index) => <span key={`${entry}-${index}`}>{entry}</span>)}</div>
     {settings.commentatorEnabled &&
-      <Live2DCommentator audioElement={live2dAudio} speaking={live2dSpeaking} size={settings.avatarSize} />}
+      <Live2DCommentator
+        audioElement={live2dAudio}
+        speaking={live2dSpeaking}
+        size={settings.avatarSize}
+        foreground={state?.phase === 'ended'}
+      />}
     <section className="commentary" style={{ '--avatar-size': `${settings.avatarSize}px` } as React.CSSProperties}>
       <img src="/static/img/commentator_avatar.png" alt={text.aiCommentator} />
       <div><p>{settings.commentatorEnabled

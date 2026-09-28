@@ -32,7 +32,8 @@ vi.mock('../services/useGameSession', () => ({
     },
     command,
     signal,
-    subscribe
+    subscribe,
+    serverTime: (clientTime = Date.now()) => clientTime
   })
 }));
 vi.mock('../services/apiClient', () => ({
@@ -159,6 +160,7 @@ describe('PlayerApp', () => {
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
     expect(playerReady).toHaveBeenCalled();
     expect(document.querySelector('.player-header p')).toBeNull();
+    fireEvent.click(screen.getByText('Player settings'));
     expect(document.querySelector('.settings-card .status-message')?.textContent).toContain('Camera + MediaPipe active');
     fireEvent.click(screen.getByRole('button', { name: 'Stop camera' }));
     expect(cameraStop).toHaveBeenCalled();
@@ -184,6 +186,7 @@ describe('PlayerApp', () => {
     const { PlayerApp } = await import('../pages/PlayerApp');
     render(<PlayerApp initialSettings={{ language: 'en' }} />);
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
+    fireEvent.click(screen.getByText('Player settings'));
     const cameraSelect = await screen.findByLabelText('Camera');
     await waitFor(() => expect(screen.getByRole('option', { name: 'USB camera' })).toBeTruthy());
     fireEvent.change(cameraSelect, { target: { value: 'camera-2' } });
@@ -227,6 +230,8 @@ describe('PlayerApp', () => {
     vi.spyOn(window, 'open').mockReturnValue(popup);
     const { PlayerApp } = await import('../pages/PlayerApp');
     const { container } = render(<PlayerApp initialSettings={{ language: 'en' }} />);
+    expect(screen.queryByLabelText('Mode')).toBeNull();
+    fireEvent.click(screen.getByText('Player settings'));
     fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'solo' } });
     fireEvent.click(screen.getByText('Start round'));
     expect(container.querySelector('.settings-card .status-message')?.textContent).toContain('Local solo round');
@@ -243,10 +248,19 @@ describe('PlayerApp', () => {
 });
 
 describe('BattleApp', () => {
+  it('localizes active technique names in the battle view', async () => {
+    gameState = makeState({ phase: 'playing' });
+    const { BattleApp } = await import('../pages/BattleApp');
+    render(<BattleApp initialSettings={{ language: 'zh-HK', commentatorEnabled: false }} />);
+    expect(screen.getByText('術式順轉・蒼')).toBeTruthy();
+    expect(screen.queryByText('Lapse Blue')).toBeNull();
+  });
+
   it('renders battle controls in the selected language', async () => {
     const { BattleApp } = await import('../pages/BattleApp');
     render(<BattleApp initialSettings={{ language: 'ja' }} />);
-    expect(screen.getByText('設定を隠す')).toBeTruthy();
+    expect(screen.getByText('対戦設定')).toBeTruthy();
+    expect(screen.queryByLabelText(/カウントダウン/)).toBeNull();
     expect(screen.getByText('バトル開始')).toBeTruthy();
     expect(screen.getAllByText('プレイヤー 1').length).toBeGreaterThan(0);
   });
@@ -257,6 +271,8 @@ describe('BattleApp', () => {
     expect(screen.getByAltText('JJK Logo')).toBeTruthy();
     expect(screen.getByText('領域展開 AR')).toBeTruthy();
     expect(document.querySelector('.live2d-avatar')).toBeTruthy();
+    expect(screen.queryByLabelText(/Countdown/)).toBeNull();
+    fireEvent.click(screen.getByText('Match settings'));
     fireEvent.change(screen.getByLabelText(/Countdown/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/Layout/), { target: { value: 'vertical-stack' } });
     fireEvent.click(screen.getByText('Start battle'));
@@ -387,6 +403,7 @@ describe('BattleApp', () => {
     gameState = makeState({ phase: 'ended', winner: 'PLAYER 1' });
     const { BattleApp } = await import('../pages/BattleApp');
     const first = render(<BattleApp initialSettings={{ language: 'en' }} />);
+    expect(document.querySelector('.live2d-avatar.foreground')).toBeTruthy();
     await waitFor(() => expect(api.commentary).toHaveBeenCalledWith(
       '/api/battle-result', expect.objectContaining({ winner: 'PLAYER 1' })
     ));
