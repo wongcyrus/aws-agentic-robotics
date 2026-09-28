@@ -5,7 +5,7 @@ Independent React + TypeScript + Vite rewrite of the AR player, battle viewer, p
 ## Architecture
 
 - `index.html`: player camera, MediaPipe gesture recognition, VFX, authoritative battle scoring, standalone solo rounds, configurable playback, and throttled robot calls.
-- `battle.html`: authoritative room view, WebRTC streams, match controls, configurable rules/layout, score-grace cinematics, event commentary, browser/Polly TTS, and results.
+- `battle.html`: authoritative room view, WebRTC streams, match controls, configurable rules/layout, score-grace cinematics, event commentary, browser/Polly TTS, the interactive Shizuku Live2D co-host, and results.
 - `player.html`: origin-validated popup media surface.
 - `share.html`: resolved snapshot images, portrait enhancement status, download, and Web Share/clipboard actions.
 - Player, battle, result, and Scroll of Honor UI supports English, Hong Kong

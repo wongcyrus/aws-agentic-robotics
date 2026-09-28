@@ -232,6 +232,7 @@ describe('BattleApp', () => {
     render(<BattleApp initialSettings={{ language: 'en' }} />);
     expect(screen.getByAltText('JJK Logo')).toBeTruthy();
     expect(screen.getByText('領域展開 AR')).toBeTruthy();
+    expect(document.querySelector('.live2d-avatar')).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Countdown/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/Layout/), { target: { value: 'vertical-stack' } });
     fireEvent.click(screen.getByText('Start battle'));
@@ -335,5 +336,60 @@ describe('ShareApp', () => {
     expect(await screen.findByText('Loading player captures…')).toBeTruthy();
     expect(await screen.findByAltText('Player 1 match capture', {}, { timeout: 2000 })).toBeTruthy();
     expect(screen.getByAltText('Player 2 match capture')).toBeTruthy();
+  });
+});
+
+describe('Live2DCommentator', () => {
+  it('loads the model, animates speech, follows focus, and cleans up', async () => {
+    vi.stubGlobal('WebGLRenderingContext', class {});
+    const scriptUrls = [
+      'https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js',
+      'https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js',
+      'https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism2.min.js'
+    ];
+    const scripts = scriptUrls.map((src) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.dataset.loaded = 'true';
+      document.head.appendChild(script);
+      return script;
+    });
+    const setMouth = vi.fn();
+    const focus = vi.fn();
+    const model = {
+      anchor: { set: vi.fn() },
+      focus,
+      getLocalBounds: () => ({ x: 0, y: 0, width: 200, height: 400 }),
+      height: 400,
+      internalModel: {
+        coreModel: { setParameterValueById: setMouth },
+        update: vi.fn()
+      },
+      scale: { set: vi.fn() },
+      width: 200,
+      x: 0,
+      y: 0
+    };
+    const addChild = vi.fn();
+    const destroy = vi.fn();
+    class Application {
+      stage = { addChild };
+      destroy = destroy;
+    }
+    window.PIXI = {
+      Application,
+      live2d: { Live2DModel: { from: vi.fn().mockResolvedValue(model) } }
+    };
+    const { Live2DCommentator } = await import('../components/Live2DCommentator');
+    const view = render(<Live2DCommentator speaking size={350} />);
+    await waitFor(() => expect(addChild).toHaveBeenCalledWith(model));
+    model.internalModel.update();
+    expect(setMouth).toHaveBeenCalled();
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 12, clientY: 34 }));
+    expect(focus).toHaveBeenCalledWith(12, 34);
+    view.unmount();
+    expect(destroy).toHaveBeenCalled();
+    scripts.forEach((script) => script.remove());
+    delete window.PIXI;
   });
 });

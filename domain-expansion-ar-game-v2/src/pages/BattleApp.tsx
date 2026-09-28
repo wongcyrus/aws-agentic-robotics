@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Branding } from '../components/Branding';
+import { Live2DCommentator } from '../components/Live2DCommentator';
 import { getGesture } from '../core/catalog';
 import { remainingSeconds } from '../core/match';
 import { WebRtcSignalTypeSchema, type PlayerRole } from '../core/protocol';
@@ -39,8 +40,9 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
   const [ticker, setTicker] = useState<string[]>([]);
   const [showResultVideo, setShowResultVideo] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
+  const [live2dSpeaking, setLive2dSpeaking] = useState(false);
   const peers = useRef<WebRtcSessionService | undefined>(undefined);
-  const commentaryPlayer = useRef(new CommentaryPlayer());
+  const commentaryPlayer = useRef(new CommentaryPlayer(setLive2dSpeaking));
   const requestedPlayers = useRef(new Set<string>());
   const completedCountdown = useRef<string | null>(null);
   const completedResolution = useRef<string | null>(null);
@@ -290,6 +292,8 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
     <section className="arena">{playerCard('player1')}<div className="versus">VS</div>{playerCard('player2')}</section>
     <div className="power-bar"><span style={{ width: `${p1Score / scoreTotal * 100}%` }} /><span style={{ width: `${p2Score / scoreTotal * 100}%` }} /></div>
     <div className="battle-ticker">{ticker.slice(-3).map((entry, index) => <span key={`${entry}-${index}`}>{entry}</span>)}</div>
+    {settings.commentatorEnabled &&
+      <Live2DCommentator speaking={live2dSpeaking} size={settings.avatarSize} />}
     <section className="commentary" style={{ '--avatar-size': `${settings.avatarSize}px` } as React.CSSProperties}>
       <img src="/static/img/commentator_avatar.png" alt={text.aiCommentator} />
       <div><p>{settings.commentatorEnabled ? commentary : text.commentatorDisabled}</p>{commentaryError && <small>{commentaryError}</small>}</div>
