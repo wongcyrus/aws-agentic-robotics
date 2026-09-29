@@ -66,9 +66,12 @@ The system consists of several interconnected components:
    - Auto-scaling and monitoring configuration
 
 7. **Domain Expansion AR Game** (`domain-expansion-ar-game/`)
-   - Standalone AR experience using MediaPipe hand tracking
-   - JJK-themed gesture control for robots
-   - No WebSocket required for standalone mode
+   - React, TypeScript, MediaPipe, WebRTC, and canvas VFX
+   - Authoritative multiplayer state through API Gateway WebSocket and DynamoDB
+   - Cognito-protected REST APIs for snapshots, robot actions, and AI commentary
+   - Strands, dedicated AgentCore Runtime, and OpenClaw commentary engines
+   - Desktop, iPad, and Android tablet layouts
+   - See [Domain Expansion architecture and operations](docs/DOMAIN_EXPANSION.md)
 
 ### Tech Blog
 
@@ -391,18 +394,15 @@ Features:
 
 ### 4. Domain Expansion AR Game
 
-Interactive hand-gesture control system:
+The primary game is the React application in the
+`domain-expansion-ar-game` submodule. It uses MediaPipe hand tracking and
+legacy-compatible canvas VFX, an authoritative WebSocket coordinator, WebRTC
+player video, Cognito-protected APIs, robot actions, snapshots, Polly, and
+explicit Strands/AgentCore/OpenClaw commentary engines.
 
-- **Live Demo**: [Play Now](https://wongcyrus.github.io/domain-expansion-ar-game/)
-- **Setup**: Open `domain-expansion-ar-game/index.html` in a web browser.
-- **Local Testing**: Run `python3 serve_https.py` in the directory for mobile testing.
-
-Features:
-
-- Real-time 21-point hand tracking via MediaPipe
-- JJK-themed visual effects (Unlimited Void, Hollow Purple, etc.)
-- Direct REST API communication with robots
-- Interactive "Energy Ball" finger tracking
+Deploy it as part of the root stack with `./deploy.sh`. For local development,
+testing, production architecture, timeout behavior, and troubleshooting, see
+[Domain Expansion architecture and operations](docs/DOMAIN_EXPANSION.md).
 
 ### 5. Physical Robot Deployment
 
@@ -504,10 +504,14 @@ Each component supports session-based interaction with authentication:
 
 ### Domain Expansion AR Game
 
-- **Technology**: Vanilla JavaScript, MediaPipe, Canvas API
-- **Features**: Real-time hand tracking, cinematic JJK VFX, bilingual UI (EN/ZH)
-- **Controls**: 8+ Domain Expansions and 3+ hand techniques
-- **Deployment**: Standalone static site, GitHub Pages ready
+- **Technology**: React, TypeScript, Vite, MediaPipe, WebRTC, Canvas API
+- **Features**: Authoritative multiplayer scoring, reconnect recovery, camera
+  selection, cinematic JJK VFX, Live2D commentary, snapshots, and four UI
+  languages
+- **Commentary**: Strands Local, dedicated AgentCore Runtime, or OpenClaw;
+  selected-engine failures are surfaced without cross-engine fallback
+- **Deployment**: CloudFront, private S3 origin, API Gateway REST/WebSocket,
+  Lambda, DynamoDB, and S3 in the primary CDK stack
 
 ### Robot Client
 

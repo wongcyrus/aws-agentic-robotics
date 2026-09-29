@@ -1,100 +1,64 @@
 graph TB
-    subgraph ClientLayer ["Client Layer"]
-        BrowserGame["Domain Expansion Web AR Game"]
-        ThreeJSSim["Humanoid Simulator (Three.js WebGL)"]
-        PhysicalRobots["Physical Humanoid Robots (Raspberry Pi)"]
+    subgraph Clients["Browser clients"]
+        Viewer["Battle viewer"]
+        P1["Player 1"]
+        P2["Player 2"]
+        Share["Share/results view"]
     end
 
-    subgraph EdgeLayer ["Edge & Delivery Layer"]
-        CFGame["CloudFront CDN (Game Web)"]
-        S3Game[("S3 Bucket: Game Web Assets")]
+    subgraph Edge["Edge and API"]
+        CloudFront["CloudFront"]
+        WebBucket[("Private S3 web bucket")]
+        RestApi["API Gateway REST API"]
+        WebSocketApi["API Gateway WebSocket API"]
+        Cognito["Cognito user pool"]
     end
 
-    subgraph SecurityLayer ["Security & Identity Layer"]
-        CognitoPool["Cognito User Pool (User Directory)"]
-        CognitoIdent["Cognito Identity Pool (IAM Credentials)"]
+    subgraph Game["Domain Expansion backend"]
+        Lambda["Python Lambda router"]
+        Connections[("DynamoDB connections")]
+        Sessions[("DynamoDB sessions")]
+        Media[("S3 snapshots and commentary audio")]
     end
 
-    subgraph InterfaceLayer ["Interface & Routing Layer"]
-        APIGatewayGame["API Gateway REST API (Game HTTP Endpoints)"]
-        APIGatewayWS["API Gateway WebSocket API (Game Signaling)"]
+    subgraph Commentary["Commentary engines"]
+        Bedrock["Bedrock Converse / Strands"]
+        CommentatorRuntime["Domain commentator AgentCore Runtime"]
+        OpenClaw["OpenClaw AgentCore Runtime main agent"]
+        Polly["Amazon Polly"]
     end
 
-    subgraph ComputeLayer ["Compute & Orchestration Layer"]
-        LambdaGame["Lambda Handler (Python Game Backend Router)"]
-        SQSGame[("Amazon SQS Queue (Image Fusion)")]
-        LambdaWorker["Lambda Worker (Bedrock Image Fusion)"]
-        BedrockAgentRuntime["AWS Bedrock AgentCore Runtime"]
-        CommentatorContainer["Commentator Container (Strands ARM64)"]
-        BedrockMcpGateway["Bedrock AgentCore Tool Gateway"]
-        LambdaRobotGateway["Lambda Target (Robot MCP Gateway Tools)"]
+    subgraph Actions["Robot and presenter actions"]
+        Gateway["AgentCore Gateway"]
+        RobotApi["Robot simulator API"]
+        Devices["Robots and digital human"]
     end
 
-    subgraph AIModelLayer ["AI Model Layer"]
-        KimiModel["Moonshot Kimi K2.5 (via Bedrock)"]
-        PollyTTS["AWS Polly (Neural TTS Speech)"]
-        NovaCanvas["Amazon Nova Canvas (Image Fusion)"]
-    end
+    Viewer --> CloudFront
+    P1 --> CloudFront
+    P2 --> CloudFront
+    Share --> CloudFront
+    CloudFront --> WebBucket
+    CloudFront --> RestApi
 
-    subgraph DataLayer ["Data & State Layer"]
-        DDBGame[("DynamoDB: Connections & Sessions")]
-        S3Photos[("S3 Bucket: Webcam Snaps & AI Portraits")]
-        S3Audio[("S3 Bucket: Polly Commentary Audio")]
-    end
+    Viewer --> WebSocketApi
+    P1 --> WebSocketApi
+    P2 --> WebSocketApi
+    Viewer --> Cognito
+    P1 --> Cognito
+    P2 --> Cognito
 
-    subgraph DeviceLayer ["Device & Messaging Layer"]
-        IoTCore["AWS IoT Core (MQTT Message Broker)"]
-    end
+    RestApi --> Lambda
+    WebSocketApi --> Lambda
+    Lambda --> Connections
+    Lambda --> Sessions
+    Lambda --> Media
 
-    %% Edge delivery
-    CFGame --> S3Game
-    BrowserGame -->|Pulls Static Assets| CFGame
-    ThreeJSSim -->|Pulls Static Assets| CFGame
-
-    %% Identity & auth
-    BrowserGame -->|Sign In / Retrieve JWT| CognitoPool
-    BrowserGame -->|Exchange JWT for Temp IAM| CognitoIdent
-
-    %% Game REST & WS path
-    BrowserGame -->|Cognito Auth REST Calls| APIGatewayGame
-    BrowserGame -->|WebSocket Signaling| APIGatewayWS
-    APIGatewayGame --> LambdaGame
-    APIGatewayWS --> LambdaGame
-
-    %% Game database & storage paths
-    LambdaGame --> DDBGame
-    LambdaGame --> S3Photos
-    LambdaGame -->|Enqueue Image Requests| SQSGame
-    SQSGame --> LambdaWorker
-    LambdaWorker -->|Detect Face & Compose| NovaCanvas
-    LambdaWorker --> S3Photos
-    LambdaWorker --> DDBGame
-
-    %% AgentCore runtime commentary pathway
-    LambdaGame -->|Invoke Session| BedrockAgentRuntime
-    BedrockAgentRuntime -->|HTTP POST /invocations| CommentatorContainer
-    CommentatorContainer -->|Converse with Multimodal Images| KimiModel
-    CommentatorContainer -->|SigV4 Tool Call| BedrockMcpGateway
-    BedrockMcpGateway -->|Invoke Target| LambdaRobotGateway
-    LambdaRobotGateway -->|Publish Posture Command| IoTCore
-    IoTCore -->|MQTT Command Delivery| PhysicalRobots
-    IoTCore -->|MQTT Sync| ThreeJSSim
-
-    %% Polly Delivery
-    LambdaGame -->|Synthesize Dialogue| PollyTTS
-    PollyTTS -->|Save MP3 Stream| S3Audio
-    LambdaGame -->|Return Presigned MP3 URL| APIGatewayGame
-
-    %% Style Class Definitions %%
-    classDef Compute fill:#FF9900,stroke:#D68100,stroke-width:2px,color:#FFFFFF;   %% Orange
-    classDef Storage fill:#1A5F7A,stroke:#103F54,stroke-width:2px,color:#FFFFFF;   %% Blue
-    classDef Security fill:#7B2CBF,stroke:#5A189A,stroke-width:2px,color:#FFFFFF;  %% Purple
-    classDef Gateway fill:#008B8B,stroke:#006666,stroke-width:2px,color:#FFFFFF;  %% Teal
-    classDef Client fill:#4A4E69,stroke:#22223B,stroke-width:2px,color:#FFFFFF;   %% Grey
-    classDef Shared fill:#2E8B57,stroke:#1E5631,stroke-width:2px,color:#FFFFFF;   %% Green
-
-    class BrowserGame,ThreeJSSim,PhysicalRobots Client;
-    class S3Game,DDBGame,S3Photos,S3Audio Storage;
-    class CognitoPool,CognitoIdent Security;
-    class CFGame,APIGatewayGame,APIGatewayWS,BedrockMcpGateway,IoTCore Gateway;
-    class LambdaGame,SQSGame,LambdaWorker,BedrockAgentRuntime,CommentatorContainer,LambdaRobotGateway,KimiModel,PollyTTS,NovaCanvas Compute;
+    Lambda --> Bedrock
+    Lambda --> CommentatorRuntime
+    Lambda --> OpenClaw
+    Lambda --> Polly
+    Lambda --> Gateway
+    Lambda --> RobotApi
+    Gateway --> Devices
+    RobotApi --> Devices

@@ -47,20 +47,22 @@ graph TB
         LambdaMCP["Lambda Function URL (Shared Robotics MCP Server)"]
         LambdaRobotGateway["Lambda Target (Robot-only MCP Gateway)"]
         LambdaGame["Lambda Handler (Python Game Backend)"]
-        SQSGame[("Amazon SQS (Image Fusion Queue)")]
-        LambdaWorker["Lambda Worker (Bedrock Image Fusion)"]
     end
 
     subgraph AIModelLayer ["AI Model Layer"]
         NovaSonic["Amazon Nova 2 Sonic"]
         NovaText["Amazon Nova 2 Lite / Nova Pro"]
-        NovaCanvas["Amazon Nova Canvas"]
+        Kimi["Moonshot Kimi on Bedrock"]
+        GameAgent["Domain Commentator AgentCore Runtime"]
+        OpenClaw["OpenClaw AgentCore Runtime"]
+        Polly["Amazon Polly"]
     end
 
     subgraph DataLayer ["Data & State Layer"]
         DDBGame[("DynamoDB: Game & Snapshot Sessions")]
         DDBRobots[("DynamoDB: Robot Configuration & Joints")]
         DDBSpeech[("DynamoDB: Speech / Presenter Messages")]
+        S3GameMedia[("S3: Game Snapshots & Commentary Audio")]
         S3Audio[("S3 Bucket: Polly Audio Assets")]
     end
 
@@ -105,12 +107,13 @@ graph TB
     APIGatewayGame --> LambdaGame
     APIGatewayWS --> LambdaGame
 
-    LambdaGame -->|Enqueue Image Requests| SQSGame
-    SQSGame --> LambdaWorker
-    LambdaWorker -->|Generate Image Fusion| NovaCanvas
-    LambdaWorker -->|Update Snapshot Status| DDBGame
     LambdaGame --> DDBGame
-    LambdaGame --> DDBRobots
+    LambdaGame --> S3GameMedia
+    LambdaGame -->|Strands / Converse| Kimi
+    LambdaGame -->|Invoke runtime| GameAgent
+    LambdaGame -->|Invoke runtime| OpenClaw
+    LambdaGame -->|Synthesize commentary| Polly
+    LambdaGame -->|Robot and digital-human tools| BedrockMcpGateway
 
     %% MCP execution path
     LambdaMCP -->|Robot / Dog / Drone / Speech Tools| IoTCore
@@ -259,27 +262,61 @@ This provides a stable contract for future expansion: new tools can be added ins
 
 ## 🎮 Domain Expansion Game Architectural Specifications
 
-The JJK Domain Expansion AR Game incorporates high-fidelity hand sign gesture recognition using MediaPipe and interacts serverlessly with the AWS Cloud.
+The primary game is a React/TypeScript application delivered by the same
+`aws-agentic-robotics` stack as the shared Cognito, robot simulator, and
+AgentCore Gateway resources. See [Domain Expansion AR Game](DOMAIN_EXPANSION.md)
+for the complete operational guide.
 
-### 1. Secure Split-Routing REST Architecture
-To deliver a secure game that perfectly integrates with native browser media elements (which cannot attach custom HTTP bearer authorization headers), we designed a **split-route API Gateway Rest API**:
+### 1. Edge routing and authentication
 
-* 🔒 **Cognito Protected Endpoints (Catch-All Proxy `/{proxy+}`)**:
-  * Critical HTTP methods like `/api/enhance-portrait` (triggering expensive Bedrock Canvas style fusions), `/api/register-room`, `/api/live-status`, `/api/battle-result`, and `/api/trigger-technique` (orchestrating server-side JJK techniques) are proxy-mapped to the AWS Lambda backend.
-  * **Server-Side Orchestration (`/api/trigger-technique`)**: Hand sign gestures and techniques are now sent directly to the serverless backend. The Lambda handler uses a server-defined mapping dictionary (`JJK_ACTION_MAP`) to translate JJK techniques to physical robot simulator actions, concurrently calling (1) the simulator REST endpoint and (2) the asynchronous MCP `robot_speak` tool for AWS Polly synthesized audio. This migrates high-fidelity cloud orchestration from client browser to backend server.
-  * They are protected by an **API Gateway Cognito User Pools Authorizer**. If the client request lacks a valid Cognito bearer token, API Gateway drops the query instantly with a `401 Unauthorized` response.
-* 🔓 **Public Media Access (`/api/get-snapshot` & `/api/last-image`)**:
-  * Because standard browser HTML image elements (e.g., `<img src="...">`) fetch images natively and cannot append custom authorization headers, protecting image retrievals with Cognito would prevent pictures from loading.
-  * We explicitly defined these two read-only endpoints as **explicit API Gateway resources** with `AuthorizationType.NONE`.
-  * Because they are read-only and require a valid, secret `sessionId` (e.g., `"mcpserver"`) to locate the snapshot, they are completely safe from malicious exploits while allowing images to render flawlessly.
+CloudFront is the browser origin. Static files come from a private S3 bucket
+through Origin Access Control. `/api/*` and `/health` route to API Gateway REST,
+while browsers connect directly to API Gateway WebSocket for game state and
+WebRTC signaling.
 
-### 2. High-Performance Battle Mode Real-Time Sync
-* **WebRTC P2P Signaling**: 
-  The game supports local and online multiplayer modes. In online mode, browsers establish a secure, encrypted peer-to-peer **WebRTC** connection to stream user camera views directly between players' screens.
-* **WebSocket Signaling**:
-  The game's Socket.io / API Gateway WebSocket connection acts only as a lightweight room coordination signaling switchboard. It handles only game coordinates, technique triggers, and score broadcasts (never seeing camera streams), saving maximum cloud bandwidth and keeping latencies minimal.
-  * **Cost-Saving Session Guards**: The frontend leverages a `setInterval` loop to verify the lifespan of the Cognito JWT token locally. Upon expiration, the frontend forces an immediate `.close()` event on the WebSocket, ensuring idle clients do not continuously drain API Gateway or AgentCore runtime billing meters.
+Cognito protects state-changing REST endpoints. Snapshot reads are explicitly
+public for native browser image loading. WebSocket `$connect` validates the
+Cognito token through the Lambda authorizer.
 
-### 3. Consolidated `"mcpserver"` Default Session Key
-* **Standardization**: Both frontend elements ([battle.js](../domain-expansion-ar-game/static/js/battle.js), [hand_tracker.js](../domain-expansion-ar-game/static/js/hand_tracker.js)) and cloud backend components ([lambda_function.py](../domain-expansion-ar-game-serverless/backend/lambda_function.py), [image_processor.py](../domain-expansion-ar-game-serverless/backend/image_processor.py), [commentary.py](../domain-expansion-ar-game-serverless/backend/commentary.py)) default to a standard `"mcpserver"` session ID.
-* This ensures that any battles fought, snapshots captured, or commentaries generated are seamlessly integrated and accessible by your conversational agents.
+### 2. Authoritative gameplay and WebRTC
+
+Lambda and DynamoDB own match phase, revision, controller identity, challenge
+deadlines, scores, reconnect snapshots, and command idempotency. Browser
+recognition timestamps are adjusted to server time and validated for challenge
+start, deadline, delivery delay, and future clock skew.
+
+The viewer sends authoritative challenge-expiry commands, preventing
+background-throttled player tabs from stalling a match. Camera video remains
+peer-to-peer through WebRTC; the cloud carries signaling but not video frames.
+
+### 3. Commentary and speech
+
+The selected engine is explicit and never silently replaced:
+
+- `strands_local` runs Strands in Lambda against Moonshot Kimi.
+- `agentcore_runtime` invokes the dedicated commentator runtime.
+- `openclaw` invokes the OpenClaw runtime's `main` Kimi-backed agent.
+
+OpenClaw game sessions are isolated per match. CloudFront and API Gateway allow
+60 seconds, Lambda allows 55 seconds, and the AgentCore SDK read timeout is 50
+seconds. Selected-engine failures are returned to the UI rather than falling
+back to another model.
+
+Amazon Polly is optional. When selected, Lambda stores generated MP3 audio in
+the game media bucket and returns a short-lived signed URL. Otherwise the
+browser uses speech synthesis.
+
+### 4. Deployment and verification
+
+The frontend submodule, backend, APIs, runtime, tables, buckets, and
+distribution are owned by the single `aws-agentic-robotics` stack. `deploy.sh`
+builds the frontend, deploys CDK, synchronizes videos, and can run health and
+AgentCore checks.
+
+The deployed commentary smoke test discovers the stack URL through
+CloudFormation, creates a temporary Cognito user, invokes every commentary
+engine over HTTPS, validates the responses, and removes the user:
+
+```bash
+npm --prefix domain-expansion-ar-game run test:commentary:aws
+```

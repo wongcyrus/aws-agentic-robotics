@@ -1,56 +1,32 @@
 sequenceDiagram
     autonumber
-    actor Player as Web Browser JS (MediaPipe)
-    participant APIGW as API Gateway REST API
-    participant Lambda as Monolithic Lambda (Server)
-    participant BedrockRuntime as Bedrock AgentCore Runtime
-    participant AgentContainer as Commentator Container (Strands)
-    participant ToolGateway as Bedrock AgentCore Tool Gateway
-    participant ToolLambda as Downstream Tool Lambda
-    participant IoTCore as AWS IoT Core (MQTT)
-    participant Robot as Physical Robot / Simulator
+    actor Player as Player browser
+    participant WS as API Gateway WebSocket
+    participant Game as Domain Expansion Lambda
+    participant State as DynamoDB
+    participant Viewer as Battle viewer
+    participant REST as API Gateway REST
+    participant Engine as Selected commentary engine
+    participant Polly as Amazon Polly
 
-    %% Step 1: Gesture recognized in JS, calling Server
-    Player->>Player: Track 21 hand landmarks on-device
-    Note over Player: Recognize "Malevolent Shrine" gesture
-    Player->>APIGW: HTTP POST /api/trigger-technique (Cognito Bearer JWT)
-    
-    %% Step 2: API Gateway to Lambda Server
-    Note over APIGW: Validate Cognito JWT at cloud edge
-    APIGW->>Lambda: Forward payload to Flask Lambda Backend
-    
-    %% Step 3: Server Orchestration & Runtime Invocation
-    Note over Lambda: Parse JJK_ACTION_MAP<br/>1. Trigger physical action<br/>2. Retrieve pre-match webcam photos
-    Lambda->>Robot: Make direct async REST call to stance controller
-    Note over Lambda: Embed webcam photos inside prompt<br/>using <p1_webcam_base64_jpeg> tags
-    Lambda->>BedrockRuntime: invoke_agent_runtime(agentRuntimeArn, payload_dict)
+    Player->>Player: MediaPipe recognizes hand landmarks
+    Player->>WS: challenge.succeeded(recognizedAt)
+    WS->>Game: WebSocket command
+    Game->>State: Validate revision, deadline, and idempotency
+    Game->>State: Persist score and resolution
+    Game-->>WS: Authoritative room.snapshot
+    WS-->>Viewer: Updated match state
+    WS-->>Player: Updated match state
 
-    %% Step 4: AgentCore Runtime Container Execution
-    Note over BedrockRuntime: Route payload via IAM SigV4
-    BedrockRuntime->>AgentContainer: HTTP POST /invocations to ARM64 Container
-    Note over AgentContainer: regex_extract base64 from XML tags<br/>Convert to Bedrock binary multimodal parts
-    AgentContainer->>AgentContainer: Execute Strands Agent logic wrapping Bedrock model
-   
-    %% Step 5: Model Tool Call / Query Routing
-    Note over AgentContainer: Model decides to execute a tool<br/>(e.g., query robot battery/state tool)
-    AgentContainer->>BedrockRuntime: propagate tool_call JSON-RPC
-    BedrockRuntime->>ToolGateway: Route SigV4-signed tool_call
-
-    %% Step 6: Tool Gateway to Downstream Target
-    Note over ToolGateway: Validate IAM permissions &<br/>resolve name: target___tool_name
-    ToolGateway->>ToolLambda: Invoke Downstream Target Lambda
-    Note over ToolLambda: Strip target prefix<br/>Publish posture state to IoT
-    ToolLambda->>IoTCore: iot:Publish (robot_1/topic)
-    IoTCore-->>Robot: MQTT Command Delivery
-    ToolLambda-->>ToolGateway: Return execution output payload
-    ToolGateway-->>BedrockRuntime: Return tool output
-    BedrockRuntime-->>AgentContainer: Feed tool result back to model
-    Note over AgentContainer: Model completes sassy narration
-
-    %% Step 7: Response & Speech Delivery
-    AgentContainer-->>BedrockRuntime: HTTP 200 {"response": "...sassy text..."}
-    BedrockRuntime-->>Lambda: Return response payload
-    Note over Lambda: 1. Clean Markdown formatting using BeautifulSoup<br/>2. Call AWS Polly SynthesizeSpeech (Neural Cantonese)<br/>3. Upload audio to S3 & generate presigned URL
-    Lambda-->>APIGW: Return HTTP 200 {"text": "...", "audioUrl": "..."}
-    APIGW-->>Player: Return JSON payload
-    Player->>Player: Play high-fidelity neural audio commentary!
+    Viewer->>REST: POST /api/live-status with Cognito token
+    REST->>Game: Authorized Lambda proxy request
+    Game->>Engine: Invoke strands_local, agentcore_runtime, or openclaw
+    Note over Game,Engine: No cross-engine fallback
+    Engine-->>Game: Commentary text
+    opt AWS TTS selected
+        Game->>Polly: SynthesizeSpeech
+        Polly-->>Game: MP3 audio
+    end
+    Game-->>REST: Commentary JSON and optional signed audio URL
+    REST-->>Viewer: HTTPS response
+    Viewer->>Viewer: Display commentary and play speech

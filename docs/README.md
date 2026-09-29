@@ -9,6 +9,7 @@ Generated: 2026-06-27 01:11 UTC
 
 - [Repository README](../README.md)
 - [AWS Cost Estimation Guide](COST_ESTIMATION.md)
+- [Domain Expansion AR Game](DOMAIN_EXPANSION.md)
 - [Text Control: README](../text_control/README.md)
 - [Speech Control: README](../speech_control_agentcore/README.md)
 - [CDK Infrastructure: README](../cdk/README.md)
@@ -24,12 +25,10 @@ Generated: 2026-06-27 01:11 UTC
 
 - [Readme](../cdk/README.md)
 
-### domain-expansion-ar-game (4)
+### domain-expansion-ar-game
 
 - [Readme](../domain-expansion-ar-game/README.md)
-- [Commentary System](../domain-expansion-ar-game/docs/commentary_system.md)
-- [Custom Agent Setup](../domain-expansion-ar-game/docs/custom_agent_setup.md)
-- [Openclaw Integration](../domain-expansion-ar-game/docs/openclaw_integration.md)
+- [Architecture and Operations](DOMAIN_EXPANSION.md)
 
 ### domain-expansion-commentator-agentcore (2)
 
