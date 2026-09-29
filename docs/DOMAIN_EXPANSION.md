@@ -182,6 +182,11 @@ From the repository root:
 ./scripts/test-all.sh
 ```
 
+`test-all.sh` triggers the three deployed commentary engines by default and
+therefore requires AWS credentials, network access, and the deployed primary
+stack. Deterministic CI runs set `SKIP_AWS_COMMENTARY_TEST=true`; the dedicated
+AWS smoke command remains available for deployment pipelines.
+
 Focused game validation:
 
 ```bash

@@ -50,4 +50,6 @@ jobs:
         run: ./scripts/lint.sh
 
       - name: Run all deterministic tests
+        env:
+          SKIP_AWS_COMMENTARY_TEST: "true"
         run: ./scripts/test-all.sh

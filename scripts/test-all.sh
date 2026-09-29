@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+ORIGINAL_AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID-}"
+ORIGINAL_AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY-}"
+ORIGINAL_AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN-}"
+
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
 export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-test}"
@@ -60,6 +64,23 @@ run_pytest_coverage \
     "Domain Expansion commentator AgentCore" \
     "domain-expansion-commentator-agentcore" \
     85
+
+if [[ "${SKIP_AWS_COMMENTARY_TEST:-false}" == "true" ]]; then
+    echo "==> Domain Expansion deployed commentary engines (skipped)"
+else
+    echo "==> Domain Expansion deployed commentary engines"
+    (
+        if [[ -n "${ORIGINAL_AWS_ACCESS_KEY_ID}" ]]; then
+            export AWS_ACCESS_KEY_ID="${ORIGINAL_AWS_ACCESS_KEY_ID}"
+            export AWS_SECRET_ACCESS_KEY="${ORIGINAL_AWS_SECRET_ACCESS_KEY}"
+            export AWS_SESSION_TOKEN="${ORIGINAL_AWS_SESSION_TOKEN}"
+        else
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+        fi
+        cd "${ROOT_DIR}/domain-expansion-ar-game"
+        npm run test:commentary:aws
+    )
+fi
 
 echo "==> Robot clients"
 (
