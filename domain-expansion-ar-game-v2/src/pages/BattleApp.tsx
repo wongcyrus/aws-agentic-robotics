@@ -325,9 +325,12 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         ? openingCommentaryLoading ? text.preparingCommentary : commentary
         : text.commentatorDisabled}</p>{commentaryError && <small>{commentaryError}</small>}</div>
     </section>
-    <button className="panel-toggle battle-panel-toggle" onClick={() => setShowSettings((visible) => !visible)}>
-      {showSettings ? text.hideSettings : text.matchSettings}
-    </button>
+    <button
+      className={`panel-toggle settings-toggle battle-panel-toggle ${showSettings ? 'active' : ''}`}
+      aria-label={showSettings ? text.hideSettings : text.matchSettings}
+      title={showSettings ? text.hideSettings : text.matchSettings}
+      onClick={() => setShowSettings((visible) => !visible)}
+    >⚙</button>
     <button className="primary battle-start" onClick={start}>{matchActive ? text.stopReset : text.startBattle}</button>
     {openingCommentaryLoading && <section className="preparing-overlay" role="status" aria-live="polite">
       <div className="loading-spinner" />
@@ -343,8 +346,8 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
       <label><input type="checkbox" checked={settings.synchronizedGestures} onChange={(event) => setSettings({ ...settings, synchronizedGestures: event.target.checked })} /> {text.sameGesture}</label>
       <label>{text.layout}<select value={settings.layout} onChange={(event) => setSettings({ ...settings, layout: event.target.value as typeof settings.layout })}><option value="side-by-side">{text.sideBySide}</option><option value="vertical-stack">{text.verticalStack}</option></select></label>
       <label><input type="checkbox" checked={settings.dynamicView} onChange={(event) => setSettings({ ...settings, dynamicView: event.target.checked })} /> {text.dynamicView}</label>
-      <details>
-        <summary>{text.aiCommentator}</summary>
+      <section className="commentator-settings">
+        <h3>{text.aiCommentator}</h3>
         <label><input type="checkbox" checked={settings.commentatorEnabled} onChange={(event) => setSettings({ ...settings, commentatorEnabled: event.target.checked })} /> {text.enabled}</label>
         <label>{text.language}<select value={settings.language} onChange={(event) => setSettings({ ...settings, language: event.target.value as typeof settings.language })}><option value="zh-HK">廣東話</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option></select></label>
         <label>{text.engine}<select value={settings.commentaryEngine} onChange={(event) => setSettings({ ...settings, commentaryEngine: event.target.value as typeof settings.commentaryEngine })}><option value="strands_local">Strands Local</option><option value="agentcore_runtime">AgentCore Runtime</option><option value="openclaw">OpenClaw</option></select></label>
@@ -355,7 +358,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
         <label>{text.imagePolicy}<select value={settings.commentatorImagePolicy} onChange={(event) => setSettings({ ...settings, commentatorImagePolicy: event.target.value as typeof settings.commentatorImagePolicy })}><option value="always">{text.always}</option><option value="start_end">{text.startEnd}</option><option value="never">{text.never}</option></select></label>
         <label><input type="checkbox" checked={settings.foulLanguage} onChange={(event) => setSettings({ ...settings, foulLanguage: event.target.checked })} /> {text.trashTalk}</label>
         <label>{text.avatarSize} <input type="range" min="150" max="700" step="10" value={settings.avatarSize} onChange={(event) => setSettings({ ...settings, avatarSize: Number(event.target.value) })} />{settings.avatarSize}px</label>
-      </details>
+      </section>
       <button onClick={() => { saveSettings(settings); setShowSettings(false); }}>{text.saveHide}</button>
       <button onClick={() => setSettings(defaultSettings)}>{text.resetDefaults}</button>
     </aside>}
@@ -378,7 +381,7 @@ export function BattleApp({ initialSettings = {} }: { initialSettings?: Partial<
           <button onClick={() => command('match.reset')}>{text.backLobby}</button>
         </>}
     </section>}
-    {cinematicCasts.length > 0 && <section className={`cinematic ${cinematicCasts.length > 1 ? 'cinematic-grid' : ''}`}>
+    {cinematicCasts.length > 0 && <section className={`cinematic cinematic-overlay ${cinematicCasts.length > 1 ? 'cinematic-grid' : ''}`}>
       {cinematicCasts.map((cast, index) => {
         const key = `${cast.role}:${cast.videoSrc}:${index}`;
         return <video key={key} src={cast.videoSrc ?? ''} autoPlay playsInline onEnded={() => completeCastVideo(key)} />;

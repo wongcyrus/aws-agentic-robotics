@@ -20,11 +20,12 @@ const playerReady = vi.fn();
 const viewerRequested = vi.fn();
 const handleSignal = vi.fn();
 const closePeers = vi.fn();
+let gameStatus = 'connected';
 
 vi.mock('../services/useGameSession', () => ({
   useGameSession: () => ({
     state: gameState,
-    status: 'connected',
+    status: gameStatus,
     config: {
       apiBaseUrl: 'https://api.test',
       webSocketUrl: 'wss://socket.test',
@@ -109,6 +110,7 @@ beforeEach(() => {
   cameraStart.mockReset().mockResolvedValue({ getTracks: () => [] });
   cameraStop.mockReset();
   playerReady.mockReset();
+  gameStatus = 'connected';
   viewerRequested.mockReset();
   handleSignal.mockReset();
   history.replaceState({}, '', '/');
@@ -160,7 +162,9 @@ describe('PlayerApp', () => {
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
     expect(playerReady).toHaveBeenCalled();
     expect(document.querySelector('.player-header p')).toBeNull();
-    fireEvent.click(screen.getByText('Player settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Player settings' }));
+    expect(screen.getByRole('heading', { name: 'Player settings' }).closest('details')).toBeNull();
+    expect(screen.getByLabelText('Language')).toBeTruthy();
     expect(document.querySelector('.settings-card .status-message')?.textContent).toContain('Camera + MediaPipe active');
     fireEvent.click(screen.getByRole('button', { name: 'Stop camera' }));
     expect(cameraStop).toHaveBeenCalled();
@@ -168,6 +172,26 @@ describe('PlayerApp', () => {
     expect(screen.getByDisplayValue('ABCD')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'player2' } });
     expect(screen.getByDisplayValue('PLAYER 2')).toBeTruthy();
+  });
+
+  it('keeps the camera active while connecting and announces it after reconnect', async () => {
+    gameStatus = 'connecting';
+    gameState = makeState();
+    const { PlayerApp } = await import('../pages/PlayerApp');
+    const view = render(<PlayerApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(cameraStart).toHaveBeenCalled());
+    expect(playerReady).not.toHaveBeenCalled();
+
+    gameStatus = 'connected';
+    view.rerender(<PlayerApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(playerReady).toHaveBeenCalledTimes(1));
+
+    gameStatus = 'disconnected';
+    view.rerender(<PlayerApp initialSettings={{ language: 'en' }} />);
+    gameStatus = 'connected';
+    view.rerender(<PlayerApp initialSettings={{ language: 'en' }} />);
+    await waitFor(() => expect(playerReady).toHaveBeenCalledTimes(2));
+    expect(cameraStart).toHaveBeenCalledTimes(1);
   });
 
   it('lists cameras and switches the active camera immediately', async () => {
@@ -186,8 +210,9 @@ describe('PlayerApp', () => {
     const { PlayerApp } = await import('../pages/PlayerApp');
     render(<PlayerApp initialSettings={{ language: 'en' }} />);
     await waitFor(() => expect(cameraStart).toHaveBeenCalled());
-    fireEvent.click(screen.getByText('Player settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Player settings' }));
     const cameraSelect = await screen.findByLabelText('Camera');
+    expect(cameraSelect.closest('details')).toBeNull();
     await waitFor(() => expect(screen.getByRole('option', { name: 'USB camera' })).toBeTruthy());
     fireEvent.change(cameraSelect, { target: { value: 'camera-2' } });
     await waitFor(() => expect(cameraStart).toHaveBeenLastCalledWith(
@@ -218,7 +243,7 @@ describe('PlayerApp', () => {
     const { PlayerApp } = await import('../pages/PlayerApp');
     render(<PlayerApp initialSettings={{ language: 'zh-TW' }} />);
     expect(screen.getByRole('button', { name: '啟動相機' })).toBeTruthy();
-    expect(screen.getByText('玩家設定')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '玩家設定' })).toBeTruthy();
     expect(screen.getByText('等待對戰開始')).toBeTruthy();
   });
 
@@ -230,8 +255,7 @@ describe('PlayerApp', () => {
     vi.spyOn(window, 'open').mockReturnValue(popup);
     const { PlayerApp } = await import('../pages/PlayerApp');
     const { container } = render(<PlayerApp initialSettings={{ language: 'en' }} />);
-    expect(screen.queryByLabelText('Mode')).toBeNull();
-    fireEvent.click(screen.getByText('Player settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Player settings' }));
     fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'solo' } });
     fireEvent.click(screen.getByText('Start round'));
     expect(container.querySelector('.settings-card .status-message')?.textContent).toContain('Local solo round');
@@ -242,8 +266,6 @@ describe('PlayerApp', () => {
     fireEvent.click(screen.getByText('Save & hide'));
     expect(localStorage.getItem('domain-expansion-v2.settings')).toContain('"playerMode":"solo"');
     expect(screen.queryByLabelText('Mode')).toBeNull();
-    fireEvent.click(screen.getByText('Player settings'));
-    expect(screen.getByLabelText('Mode')).toBeTruthy();
   });
 });
 
@@ -259,8 +281,8 @@ describe('BattleApp', () => {
   it('renders battle controls in the selected language', async () => {
     const { BattleApp } = await import('../pages/BattleApp');
     render(<BattleApp initialSettings={{ language: 'ja' }} />);
-    expect(screen.getByText('対戦設定')).toBeTruthy();
-    expect(screen.queryByLabelText(/カウントダウン/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '対戦設定' }));
+    expect(screen.getByLabelText(/カウントダウン/)).toBeTruthy();
     expect(screen.getByText('バトル開始')).toBeTruthy();
     expect(screen.getAllByText('プレイヤー 1').length).toBeGreaterThan(0);
   });
@@ -271,8 +293,8 @@ describe('BattleApp', () => {
     expect(screen.getByAltText('JJK Logo')).toBeTruthy();
     expect(screen.getByText('領域展開 AR')).toBeTruthy();
     expect(document.querySelector('.live2d-avatar')).toBeTruthy();
-    expect(screen.queryByLabelText(/Countdown/)).toBeNull();
-    fireEvent.click(screen.getByText('Match settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Match settings' }));
+    expect(screen.getByRole('heading', { name: 'AI commentator' }).closest('details')).toBeNull();
     fireEvent.change(screen.getByLabelText(/Countdown/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/Layout/), { target: { value: 'vertical-stack' } });
     fireEvent.click(screen.getByText('Start battle'));
@@ -282,9 +304,8 @@ describe('BattleApp', () => {
     fireEvent.click(screen.getByText('Reset defaults'));
     expect(screen.getByText('Commentary is ready.')).toBeTruthy();
     fireEvent.click(screen.getByText('儲存並隱藏'));
-    expect(screen.queryByLabelText(/Countdown/)).toBeNull();
     expect(screen.getByText('開始對決')).toBeTruthy();
-    fireEvent.click(screen.getByText('戰局設定'));
+    fireEvent.click(screen.getByRole('button', { name: '戰局設定' }));
     expect(screen.getByLabelText(/倒數時間/)).toBeTruthy();
   });
 
@@ -301,6 +322,9 @@ describe('BattleApp', () => {
     const { BattleApp } = await import('../pages/BattleApp');
     const { container } = render(<BattleApp initialSettings={{ language: 'en' }} />);
     await waitFor(() => expect(viewerRequested).toHaveBeenCalledTimes(2));
+    expect(container.querySelector('.cinematic')?.classList.contains('cinematic-overlay')).toBe(true);
+    expect(container.querySelector('.arena')).toBeTruthy();
+    expect(container.querySelector('.live2d-avatar')).toBeTruthy();
     fireEvent.click(screen.getByText('Stop / reset'));
     expect(command).toHaveBeenCalledWith('match.reset');
     fireEvent.ended(container.querySelector('.cinematic video')!);

@@ -151,7 +151,6 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       setCameraActive(true);
       setCameraStatus(text.cameraActive);
       await refreshCameras();
-      webrtcRef.current?.playerReady();
     } catch (error) {
       camera.stop();
       console.error('Camera startup failed', error);
@@ -174,6 +173,14 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
     autoStartedCamera.current = true;
     void startCamera();
   }, []);
+  useEffect(() => {
+    if (status !== 'connected' || !cameraActive) return;
+    try {
+      webrtcRef.current?.playerReady();
+    } catch (error) {
+      console.warn('Unable to announce camera readiness', error);
+    }
+  }, [cameraActive, status]);
   useEffect(() => {
     const mediaDevices = navigator.mediaDevices;
     if (!mediaDevices?.addEventListener) return;
@@ -362,12 +369,20 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
       title={cameraActive ? text.stopCamera : text.startCamera}
       onClick={() => cameraActive ? stopCamera() : void startCamera()}
     >📷</button>
-    <button className="panel-toggle player-panel-toggle" onClick={() => setShowSettings((visible) => !visible)}>
-      {showSettings ? text.hideSettings : text.playerSettings}
-    </button>
+    <button
+      className={`panel-toggle settings-toggle player-panel-toggle ${showSettings ? 'active' : ''}`}
+      aria-label={showSettings ? text.hideSettings : text.playerSettings}
+      title={showSettings ? text.hideSettings : text.playerSettings}
+      onClick={() => setShowSettings((visible) => !visible)}
+    >⚙</button>
     {showSettings && <aside className="settings-card">
       <button className="panel-close" aria-label={text.hideSettings} onClick={() => setShowSettings(false)}>×</button>
       <p className="status-message">{settings.playerMode === 'solo' ? text.localSoloRound : connectionStatus} · {cameraStatus}</p>
+      <label>{text.camera}<select value={settings.cameraId} onChange={(event) => {
+        const cameraId = event.target.value;
+        setSettings({ ...settings, cameraId });
+        if (cameraActive) void startCamera(cameraId);
+      }}><option value="default">{text.defaultCamera}</option>{cameras.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `${text.camera} ${index + 1}`}</option>)}</select></label>
       <label>{text.mode}<select value={settings.playerMode} onChange={(event) => setSettings({ ...settings, playerMode: event.target.value as typeof settings.playerMode })}><option value="battle">{text.onlineBattle}</option><option value="solo">{text.soloGame}</option></select></label>
       {settings.playerMode === 'solo'
         ? <div className="button-row"><button className="primary" onClick={startSolo}>{text.startRound}</button><button onClick={stopSolo}>{text.quit}</button></div>
@@ -375,13 +390,8 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
           <label>{text.room}<input value={settings.roomCode} onChange={(event) => setSettings({ ...settings, roomCode: event.target.value.toUpperCase() })} /></label>
           <label>{text.role}<select value={settings.role} onChange={(event) => setSettings({ ...settings, role: event.target.value as PlayerRole })}><option value="player1">{text.playerLabel(1)}</option><option value="player2">{text.playerLabel(2)}</option></select></label>
         </>}
-      <details>
-        <summary>{text.playerSettings}</summary>
-        <label>{text.camera}<select value={settings.cameraId} onChange={(event) => {
-          const cameraId = event.target.value;
-          setSettings({ ...settings, cameraId });
-          if (cameraActive) void startCamera(cameraId);
-        }}><option value="default">{text.defaultCamera}</option>{cameras.map((camera, index) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label || `${text.camera} ${index + 1}`}</option>)}</select></label>
+      <section className="player-settings-section">
+        <h3>{text.playerSettings}</h3>
         <label>{text.language}<select value={settings.language} onChange={(event) => setSettings({ ...settings, language: event.target.value as typeof settings.language })}><option value="zh-HK">廣東話</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option></select></label>
         <label>{text.video}<select value={settings.videoMode} onChange={(event) => setSettings({ ...settings, videoMode: event.target.value as typeof settings.videoMode })}><option value="integrated">{text.integratedSound}</option><option value="integrated_silent">{text.integratedSilent}</option><option value="popup">{text.popupTab}</option><option value="none">{text.noVideo}</option></select></label>
         <label><input type="checkbox" checked={settings.autoOpenPopup} onChange={(event) => setSettings({ ...settings, autoOpenPopup: event.target.checked })} /> {text.autoOpenPopup}</label>
@@ -391,14 +401,17 @@ export function PlayerApp({ initialSettings = {} }: { initialSettings?: Partial<
         <label>{text.robot}<select value={settings.robotId} onChange={(event) => setSettings({ ...settings, robotId: event.target.value })}><option value="all">{text.allRobots}</option>{[1,2,3,4,5,6].map((number) => <option key={number} value={`robot_${number}`}>{text.robot} {number}</option>)}</select></label>
         <label>{text.robotCooldown} <input type="range" min="1" max="30" value={settings.robotCooldownSeconds} onChange={(event) => setSettings({ ...settings, robotCooldownSeconds: Number(event.target.value) })} />{settings.robotCooldownSeconds}s</label>
         <label><input type="checkbox" checked={settings.disableRobotApi} onChange={(event) => setSettings({ ...settings, disableRobotApi: event.target.checked })} /> {text.disableRobotApi}</label>
-      </details>
+      </section>
       <button onClick={() => {
         saveSettings(settings);
         setShowSettings(false);
       }}>{text.saveHide}</button>
       <a href={`/battle.html?room=${settings.roomCode}`}>{text.openBattleViewer}</a>
     </aside>}
-    {settings.playerMode === 'solo' && mediaSrc && <video className="integrated-media" src={mediaSrc} autoPlay muted={mediaMuted} playsInline controls onEnded={() => setMediaSrc(null)} />}
+    {settings.playerMode === 'solo' && mediaSrc && <div className="player-media-overlay">
+      <video className="integrated-media" src={mediaSrc} autoPlay muted={mediaMuted} playsInline controls onEnded={() => setMediaSrc(null)} />
+      <button onClick={() => setMediaSrc(null)}>{text.close}</button>
+    </div>}
     {solo.result && <section className="result"><h2>{solo.result}</h2><p>{text.finalScore}: {solo.score}/{settings.gestureCount}</p><button onClick={startSolo}>{text.playAgain}</button><button onClick={() => setSolo(emptySoloRound)}>{text.close}</button></section>}
   </main>;
 }
