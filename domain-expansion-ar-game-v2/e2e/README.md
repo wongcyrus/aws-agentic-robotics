@@ -47,3 +47,29 @@ non-alphanumeric characters are removed, and the result is limited to six
 characters. Each room appends a two-character scenario code and a four-character
 base-36 timestamp suffix, keeping the room at or below 12 characters while
 allowing cleanup jobs to select only rooms from one run.
+
+## Deployed AWS commentary
+
+Trigger the real deployed Strands Local, AgentCore Runtime, and OpenClaw engines
+through the authenticated REST API:
+
+```sh
+COMMENTARY_BASE_URL=https://frontend.example \
+COMMENTARY_ID_TOKEN='temporary-cognito-id-token' \
+npm run test:commentary:aws
+```
+
+The test runs each engine sequentially, requires HTTP 200 and non-empty
+commentary, verifies the reported engine, and prints response latency. It does
+not attach webcam images or request Polly audio. The token is read only from the
+environment and is not written to reports.
+
+To trigger selected engines or change the client timeout:
+
+```sh
+COMMENTARY_ENGINES=openclaw,agentcore_runtime \
+COMMENTARY_TIMEOUT_MS=65000 \
+COMMENTARY_BASE_URL=https://frontend.example \
+COMMENTARY_ID_TOKEN='temporary-cognito-id-token' \
+npm run test:commentary:aws
+```

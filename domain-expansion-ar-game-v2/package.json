@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:local": "E2E_MODE=local playwright test",
-    "test:e2e:aws": "E2E_MODE=aws playwright test"
+    "test:e2e:aws": "E2E_MODE=aws playwright test",
+    "test:commentary:aws": "node scripts/test-commentary-aws.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1141.0",
