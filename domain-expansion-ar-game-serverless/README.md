@@ -1,6 +1,6 @@
-# Domain Expansion V2 Serverless Backend
+# Domain Expansion Serverless Backend
 
-This backend is isolated from the V1 Domain Expansion deployment. It provides:
+This backend powers the primary Domain Expansion deployment. It provides:
 
 - Cognito-authorized REST APIs for robot actions, commentary, and snapshots.
 - A WebSocket coordinator using protocol version `2.0`.
@@ -10,18 +10,18 @@ This backend is isolated from the V1 Domain Expansion deployment. It provides:
   opening commentary playback from the viewer that started the match.
 - A score-grace resolution phase for near-simultaneous player successes.
 
-V2 does not implement the V1 `BroadcastChannel` cross-tab coordinator. Localhost
+Battle mode does not implement the legacy `BroadcastChannel` cross-tab coordinator. Localhost
 players and viewers connect to a locally hosted or deployed WebSocket coordinator
 using the same protocol as production.
 
 Run the backend tests from the repository root:
 
 ```bash
-python3 -m venv /tmp/domain-v2-venv
-/tmp/domain-v2-venv/bin/pip install -r domain-expansion-ar-game-v2-serverless/backend/requirements-dev.txt
+python3 -m venv /tmp/domain-venv
+/tmp/domain-venv/bin/pip install -r domain-expansion-ar-game-serverless/backend/requirements-dev.txt
 (
-  cd domain-expansion-ar-game-v2-serverless/backend
-  /tmp/domain-v2-venv/bin/pytest -q \
+  cd domain-expansion-ar-game-serverless/backend
+  /tmp/domain-venv/bin/pytest -q \
     --cov=. \
     --cov-branch \
     --cov-config=../../.coveragerc \

@@ -47,6 +47,10 @@ def test_translate_detail_replaces_robot_actions_and_scores():
     assert "P1 成功得分" in translated
 
 
+def test_translate_detail_preserves_empty_text():
+    assert commentary.translate_detail("") == ""
+
+
 @pytest.mark.parametrize(
     ("language", "phrase"),
     [("zh-HK", "廣東話"), ("zh-TW", "繁體中文"), ("ja", "日本語"), ("en", "English")],
@@ -55,7 +59,7 @@ def test_load_system_prompt_applies_language_rule(language, phrase):
     assert phrase in commentary.load_system_prompt(language)
 
 
-def test_direct_bedrock_fallback_builds_multimodal_request(monkeypatch):
+def test_direct_bedrock_commentary_builds_multimodal_request(monkeypatch):
     client = SimpleNamespace(
         converse=lambda **kwargs: {
             "output": {"message": {"content": [{"text": "generated"}]}}
@@ -63,27 +67,75 @@ def test_direct_bedrock_fallback_builds_multimodal_request(monkeypatch):
     )
     monkeypatch.setattr(commentary.boto3, "client", lambda *args, **kwargs: client)
 
-    result = commentary.direct_bedrock_fallback(
+    result = commentary.generate_direct_bedrock_commentary(
         "prompt", b"p1", "jpg", b"p2", "png", language="en"
     )
 
     assert result == "generated"
 
 
-def test_direct_bedrock_fallback_returns_stable_message_on_failure(monkeypatch):
+def test_direct_bedrock_commentary_rejects_truncated_output(monkeypatch):
+    calls = []
+
+    def converse(**kwargs):
+        calls.append(kwargs["inferenceConfig"]["maxTokens"])
+        return {
+            "stopReason": "max_tokens",
+            "output": {"message": {"content": [{"text": "truncated P2"}]}},
+        }
+
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(converse=converse),
+    )
+
+    with pytest.raises(RuntimeError, match="Direct Bedrock commentary failed"):
+        commentary.generate_direct_bedrock_commentary("prompt")
+    assert calls == [commentary.COMMENTARY_MAX_TOKENS]
+
+
+def test_direct_bedrock_commentary_surfaces_failure(monkeypatch):
     monkeypatch.setattr(
         commentary.boto3, "client", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
     )
-    assert "Cursed Energy connection unstable" in commentary.direct_bedrock_fallback("prompt")
+    with pytest.raises(RuntimeError, match="Direct Bedrock commentary failed"):
+        commentary.generate_direct_bedrock_commentary("prompt")
 
 
-def test_resolve_agentcore_identity_is_stable(monkeypatch):
+def test_direct_bedrock_commentary_rejects_response_without_text(monkeypatch):
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(
+            converse=lambda **kwargs: {
+                "output": {"message": {"content": [{"image": {}}]}}
+            }
+        ),
+    )
+    with pytest.raises(RuntimeError, match="Direct Bedrock commentary failed"):
+        commentary.generate_direct_bedrock_commentary("prompt")
+
+
+def test_local_direct_bypasses_agent_runtimes(monkeypatch):
+    monkeypatch.setattr(
+        commentary,
+        "generate_direct_bedrock_commentary",
+        lambda *args, **kwargs: "direct commentary",
+    )
+    assert commentary.generate_ai_commentary("local_direct", "fight") == "direct commentary"
+
+
+def test_resolve_agentcore_identity_keeps_actor_stable_and_isolates_sessions(monkeypatch):
     monkeypatch.setenv("AGENTCORE_ACTOR_ID", "telegram:user")
     first = commentary.resolve_agentcore_identity("one", "arn")
+    same = commentary.resolve_agentcore_identity("one", "arn")
     second = commentary.resolve_agentcore_identity("two", "arn")
-    assert first == second
+    assert first == same
     assert first[0] == "telegram:user"
     assert first[1].startswith("dashboard-user-")
+    assert first[:2] == second[:2]
+    assert first[2] != second[2]
 
 
 def test_generate_agentcore_commentary_parses_response(monkeypatch):
@@ -99,7 +151,7 @@ def test_generate_agentcore_commentary_parses_response(monkeypatch):
     assert result == "runtime answer"
 
 
-def test_generate_agentcore_commentary_falls_back_on_runtime_error(monkeypatch):
+def test_generate_agentcore_commentary_raises_on_runtime_error(monkeypatch):
     monkeypatch.setenv("AGENTCORE_RUNTIME_ARN", "arn:runtime")
     monkeypatch.setattr(
         commentary.boto3,
@@ -108,8 +160,118 @@ def test_generate_agentcore_commentary_falls_back_on_runtime_error(monkeypatch):
             invoke_agent_runtime=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
         ),
     )
-    monkeypatch.setattr(commentary, "direct_bedrock_fallback", lambda *args, **kwargs: "fallback")
-    assert commentary.generate_ai_commentary("agentcore_runtime", "fight") == "fallback"
+    with pytest.raises(RuntimeError, match="AgentCore runtime failed"):
+        commentary.generate_ai_commentary("agentcore_runtime", "fight")
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (json.dumps({"output": "bytes answer"}).encode(), "bytes answer"),
+        (json.dumps({"commentary": "string answer"}), "string answer"),
+        ([b'{"message":{"content":"', "chunked answer", b'"}}'], "chunked answer"),
+        (b"plain runtime answer", "plain runtime answer"),
+    ],
+)
+def test_generate_agentcore_commentary_handles_response_body_variants(
+    monkeypatch, body, expected
+):
+    client = SimpleNamespace(
+        invoke_agent_runtime=lambda **kwargs: {"response": body}
+    )
+    monkeypatch.setattr(commentary.boto3, "client", lambda *args, **kwargs: client)
+    monkeypatch.setenv("AGENTCORE_RUNTIME_ARN", "arn:runtime")
+
+    assert (
+        commentary.generate_ai_commentary(
+            "agentcore_runtime", "fight", session_id="session"
+        )
+        == expected
+    )
+
+
+def test_generate_agentcore_commentary_rejects_empty_response(monkeypatch):
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(
+            invoke_agent_runtime=lambda **kwargs: {"response": b"{}"}
+        ),
+    )
+    monkeypatch.setenv("AGENTCORE_RUNTIME_ARN", "arn:runtime")
+    with pytest.raises(RuntimeError, match="AgentCore runtime failed"):
+        commentary.generate_ai_commentary("agentcore_runtime", "fight")
+
+
+def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch):
+    calls = []
+    client_configs = []
+    client = SimpleNamespace(
+        invoke_agent_runtime=lambda **kwargs: calls.append(kwargs)
+        or {"response": b'{"response":"openclaw runtime answer"}'}
+    )
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: client_configs.append(kwargs["config"]) or client,
+    )
+    monkeypatch.setenv("OPENCLAW_RUNTIME_ARN", "arn:openclaw-runtime")
+    monkeypatch.setenv("OPENCLAW_SESSION_ID", "stable-session")
+
+    result = commentary.generate_ai_commentary(
+        "openclaw",
+        "fight",
+        session_id="dynamic",
+        image_bytes_p1=b"one",
+        image_format_p1="jpg",
+        image_base64_p2="two",
+        image_format_p2="png",
+    )
+
+    assert result == "openclaw runtime answer"
+    payload = json.loads(calls[0]["payload"])
+    assert calls[0]["runtimeSessionId"].startswith("dashboard_session_")
+    assert payload["image"] != ""
+    assert payload["image_format"] == "jpeg"
+    assert payload["image_p2"] == "two"
+    assert payload["session_id"] == calls[0]["runtimeSessionId"]
+    assert payload["agentId"] == "main"
+    assert payload["model"] == "openclaw/main"
+    assert client_configs[0].read_timeout == commentary.AGENTCORE_READ_TIMEOUT_SECONDS
+    assert client_configs[0].connect_timeout == 3
+
+
+def test_generate_openclaw_timeout_does_not_fallback(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_RUNTIME_ARN", "arn:openclaw-runtime")
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(
+            invoke_agent_runtime=lambda **kwargs: (_ for _ in ()).throw(TimeoutError("slow"))
+        ),
+    )
+    monkeypatch.setattr(
+        commentary,
+        "generate_direct_bedrock_commentary",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("OpenClaw must not fall back")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="OpenClaw runtime failed"):
+        commentary.generate_ai_commentary(
+            "openclaw",
+            "fight",
+            session_id="match-one",
+            image_base64_p1="encoded-image",
+        )
+
+
+def test_generate_agentcore_without_runtime_arn_raises(monkeypatch):
+    monkeypatch.setattr(commentary, "AGENTCORE_RUNTIME_ARN", "")
+    monkeypatch.delenv("AGENTCORE_RUNTIME_ARN", raising=False)
+    with pytest.raises(RuntimeError, match="AgentCore runtime failed"):
+        commentary.generate_ai_commentary("agentcore_runtime", "fight")
 
 
 def test_generate_strands_local_multimodal_commentary(monkeypatch):
@@ -142,15 +304,15 @@ def test_generate_strands_local_multimodal_commentary(monkeypatch):
     assert invocations[0][-1]["image"]["source"]["bytes"] == b"two"
 
 
-def test_generate_strands_local_falls_back(monkeypatch):
+def test_generate_strands_local_raises(monkeypatch):
     strands = ModuleType("strands")
     strands.Agent = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
     models = ModuleType("strands.models")
     models.BedrockModel = lambda **kwargs: object()
     monkeypatch.setitem(sys.modules, "strands", strands)
     monkeypatch.setitem(sys.modules, "strands.models", models)
-    monkeypatch.setattr(commentary, "direct_bedrock_fallback", lambda *args, **kwargs: "fallback")
-    assert commentary.generate_ai_commentary("strands_local", "fight") == "fallback"
+    with pytest.raises(RuntimeError, match="Strands Local commentary failed"):
+        commentary.generate_ai_commentary("strands_local", "fight")
 
 
 def test_generate_openclaw_http_commentary(monkeypatch):
@@ -181,7 +343,7 @@ def test_generate_openclaw_http_commentary(monkeypatch):
     assert request_calls[0][0][0] == "POST"
 
 
-def test_generate_openclaw_http_falls_back_on_status(monkeypatch):
+def test_generate_openclaw_http_raises_on_status(monkeypatch):
     import urllib3
 
     monkeypatch.setattr(
@@ -195,5 +357,5 @@ def test_generate_openclaw_http_falls_back_on_status(monkeypatch):
     monkeypatch.setattr(commentary, "AGENTCORE_RUNTIME_ARN", "")
     monkeypatch.delenv("OPENCLAW_RUNTIME_ARN", raising=False)
     monkeypatch.delenv("AGENTCORE_RUNTIME_ARN", raising=False)
-    monkeypatch.setattr(commentary, "direct_bedrock_fallback", lambda *args, **kwargs: "fallback")
-    assert commentary.generate_ai_commentary("openclaw", "fight") == "fallback"
+    with pytest.raises(RuntimeError, match="OpenClaw gateway failed"):
+        commentary.generate_ai_commentary("openclaw", "fight")

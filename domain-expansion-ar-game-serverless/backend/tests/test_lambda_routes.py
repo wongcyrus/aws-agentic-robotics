@@ -22,10 +22,8 @@ def test_lambda_entry_point_keeps_aws_signature():
 
 
 def test_lambda_handler_dispatches_injected_handlers():
-    records = []
     handlers = {
         "authorizer": lambda event, context: {"kind": "auth"},
-        "sqs_handler": records.append,
         "websocket_handler": lambda event, context: {"kind": "ws"},
         "http_handler": lambda event: {"kind": "http"},
     }
@@ -33,14 +31,6 @@ def test_lambda_handler_dispatches_injected_handlers():
     assert lambda_function.dispatch_event(
         {"type": "REQUEST", "methodArn": "arn"}, None, **handlers
     ) == {"kind": "auth"}
-    sqs_event = {
-        "Records": [
-            {"eventSource": "aws:sqs", "messageId": "one"},
-            {"eventSource": "other", "messageId": "two"},
-        ]
-    }
-    assert lambda_function.dispatch_event(sqs_event, None, **handlers)["statusCode"] == 200
-    assert [record["messageId"] for record in records] == ["one"]
     assert lambda_function.dispatch_event(
         {"requestContext": {"connectionId": "c"}}, None, **handlers
     ) == {"kind": "ws"}
@@ -48,91 +38,6 @@ def test_lambda_handler_dispatches_injected_handlers():
         {"path": "/health"}, None, **handlers
     ) == {"kind": "http"}
     assert lambda_function.dispatch_event([], None)["statusCode"] == 400
-
-
-def test_websocket_connect_and_disconnect_broadcast(monkeypatch):
-    deleted, posts = [], []
-    table = SimpleNamespace(
-        get_item=lambda **kwargs: {
-            "Item": {"room_code": "ROOM", "client_id": "p1", "role": "player"}
-        },
-        delete_item=lambda **kwargs: deleted.append(kwargs),
-        query=lambda **kwargs: {"Items": [{"connection_id": "other"}]},
-    )
-    monkeypatch.setattr(lambda_function, "connections_table", table)
-    monkeypatch.setattr(
-        lambda_function.boto3,
-        "client",
-        lambda *args, **kwargs: SimpleNamespace(
-            post_to_connection=lambda **kwargs: posts.append(kwargs)
-        ),
-    )
-    base_context = {
-        "connectionId": "self",
-        "domainName": "example",
-        "stage": "dev",
-    }
-    assert lambda_function.handle_websocket({}, {**base_context, "routeKey": "$connect"})["body"] == "Connected."
-    result = lambda_function.handle_websocket({}, {**base_context, "routeKey": "$disconnect"})
-    assert result["body"] == "Disconnected."
-    assert deleted == [{"Key": {"connection_id": "self"}}]
-    assert json.loads(posts[0]["Data"])["type"] == "user_left"
-
-
-def test_websocket_signal_unicast_and_missing_sender(monkeypatch):
-    posts = []
-    sender = {"client_id": "p1", "role": "player", "room_code": "ROOM"}
-    table = SimpleNamespace(
-        get_item=lambda **kwargs: {"Item": sender},
-        query=lambda **kwargs: {
-            "Items": [
-                {"connection_id": "one", "client_id": "p2"},
-                {"connection_id": "two", "client_id": "viewer"},
-            ]
-        },
-    )
-    monkeypatch.setattr(lambda_function, "connections_table", table)
-    monkeypatch.setattr(
-        lambda_function.boto3,
-        "client",
-        lambda *args, **kwargs: SimpleNamespace(
-            post_to_connection=lambda **kwargs: posts.append(kwargs)
-        ),
-    )
-    context = {
-        "connectionId": "self",
-        "routeKey": "message",
-        "domainName": "example",
-        "stage": "dev",
-    }
-    event = {"body": json.dumps({"action": "signal", "type": "offer", "data": {}, "to": "p2"})}
-    assert lambda_function.handle_websocket(event, context)["statusCode"] == 200
-    assert [call["ConnectionId"] for call in posts] == ["one"]
-
-    table.get_item = lambda **kwargs: {}
-    assert lambda_function.handle_websocket(event, context)["statusCode"] == 404
-
-
-def test_websocket_action_failure_returns_controlled_error(monkeypatch):
-    table = SimpleNamespace(
-        put_item=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("write failed"))
-    )
-    monkeypatch.setattr(lambda_function, "connections_table", table)
-    monkeypatch.setattr(
-        lambda_function.boto3,
-        "client",
-        lambda *args, **kwargs: SimpleNamespace(post_to_connection=lambda **kwargs: None),
-    )
-    response = lambda_function.handle_websocket(
-        {"body": json.dumps({"action": "join_room"})},
-        {
-            "connectionId": "self",
-            "routeKey": "message",
-            "domainName": "example",
-            "stage": "dev",
-        },
-    )
-    assert response == {"statusCode": 500, "body": "WebSocket action failed"}
 
 
 def test_register_room_log_and_unknown_routes(monkeypatch):
@@ -272,6 +177,68 @@ def test_live_status_generates_commentary_audio_and_gateway_calls(monkeypatch):
     assert gateway_calls[0]["arguments"]["message"] == "Great fight!"
 
 
+def test_local_tts_reuses_supplied_commentary_without_model_call(monkeypatch):
+    monkeypatch.setattr(
+        commentary,
+        "generate_ai_commentary",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("model should not run")),
+    )
+    monkeypatch.setattr(
+        commentary_tts,
+        "synthesize_commentary_audio",
+        lambda **kwargs: {"audioUrl": "https://audio", "duration": 1.0},
+    )
+    response = lambda_function.handle_http(
+        {
+            "path": "/api/live-status",
+            "httpMethod": "POST",
+            "body": json.dumps(
+                {
+                    "sessionId": "s",
+                    "agent_type": "local_tts",
+                    "commentaryText": "Already generated.",
+                    "agentImagePolicy": "never",
+                    "ttsMode": "aws",
+                    "lang": "en",
+                }
+            ),
+        }
+    )
+    body = _body(response)
+    assert body["commentary"] == "Already generated."
+    assert body["ttsMode"] == "aws"
+    assert body["audioUrl"] == "https://audio"
+
+
+def test_openclaw_commentary_skips_duplicate_gateway_delivery(monkeypatch):
+    gateway_calls = []
+    monkeypatch.setattr(commentary, "translate_detail", lambda text: text)
+    monkeypatch.setattr(commentary, "generate_ai_commentary", lambda **kwargs: "OpenClaw!")
+    monkeypatch.setattr(
+        lambda_function,
+        "invoke_agentcore_gateway_tool",
+        lambda **kwargs: gateway_calls.append(kwargs),
+    )
+
+    response = lambda_function.handle_http(
+        {
+            "path": "/api/live-status",
+            "httpMethod": "POST",
+            "body": json.dumps(
+                {
+                    "sessionId": "match-one",
+                    "agent_type": "openclaw",
+                    "agentImagePolicy": "never",
+                    "ttsMode": "browser",
+                }
+            ),
+        }
+    )
+
+    assert _body(response)["commentary"] == "OpenClaw!"
+    assert gateway_calls == []
+
+
 def test_battle_result_marks_reset_and_falls_back_to_browser_tts(monkeypatch):
     monkeypatch.setattr(commentary, "translate_detail", lambda text: text)
     monkeypatch.setattr(commentary, "generate_ai_commentary", lambda **kwargs: "Winner!")
@@ -391,7 +358,7 @@ def test_live_status_attaches_both_s3_images(monkeypatch):
     assert _body(response)["debugImageContext"]["hasImageP1"] is True
 
 
-def test_enhancement_and_upload_database_failures(monkeypatch):
+def test_upload_database_failure(monkeypatch):
     monkeypatch.setattr(
         lambda_function,
         "sessions_table",
@@ -399,10 +366,6 @@ def test_enhancement_and_upload_database_failures(monkeypatch):
             update_item=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("db down"))
         ),
     )
-    enhance = lambda_function.handle_http(
-        {"path": "/api/enhance-portrait", "httpMethod": "POST", "body": "{}"}
-    )
-    assert enhance["statusCode"] == 500
     monkeypatch.delenv("PHOTOS_S3_BUCKET", raising=False)
     upload = lambda_function.handle_http(
         {

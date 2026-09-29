@@ -4,6 +4,7 @@ import os
 import re
 
 import boto3
+from botocore.config import Config
 
 logger = logging.getLogger()
 
@@ -11,11 +12,20 @@ logger = logging.getLogger()
 DEFAULT_AGENT_TYPE = os.environ.get("AGENT_TYPE", "agentcore_runtime")
 OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
-OPENCLAW_AGENT_ID = os.environ.get("OPENCLAW_AGENT_ID", "domain-commentator")
+OPENCLAW_AGENT_ID = os.environ.get("OPENCLAW_AGENT_ID", "main")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
+COMMENTARY_MAX_TOKENS = int(
+    os.environ.get(
+        "COMMENTARY_MAX_TOKENS",
+        "1600" if "kimi" in BEDROCK_MODEL_ID.lower() else "400",
+    )
+)
 AGENTCORE_RUNTIME_ARN = os.environ.get("AGENTCORE_RUNTIME_ARN", "")
 OPENCLAW_RUNTIME_ARN = os.environ.get("OPENCLAW_RUNTIME_ARN", "")
+AGENTCORE_READ_TIMEOUT_SECONDS = int(
+    os.environ.get("AGENTCORE_READ_TIMEOUT_SECONDS", "50")
+)
 
 
 def _build_openclaw_content_block(
@@ -147,7 +157,6 @@ def translate_detail(text: str) -> str:
         r"\brobotMoveBackward\b": "steps back defensively",
         r"\brobotTurnLeft\b": "executes a quick left rotation",
         r"\brobotTurnRight\b": "executes a quick right rotation",
-        r"\bOnly (\d+) seconds remaining in the match! The battle is near its end!": r"對戰只剩返 \1 秒！戰局即將結束！",
         r"\bThe scores are tied! Both players are neck and neck at (\d+)!": r"比分打成平手！雙方依家以 \1 比 \1 叮噹馬頭，勢均力敵！",
         r"\bPlayer 1 successfully activated\b": "P1 成功發動",
         r"\bPlayer 2 successfully activated\b": "P2 成功發動",
@@ -199,7 +208,7 @@ Maintain her personality:
     return f"{identity}\n\n{soul}"
 
 
-def direct_bedrock_fallback(
+def generate_direct_bedrock_commentary(
     prompt: str,
     image_bytes_p1: bytes = None,
     image_format_p1: str = "jpeg",
@@ -207,12 +216,12 @@ def direct_bedrock_fallback(
     image_format_p2: str = "jpeg",
     language: str = "zh-HK",
 ) -> str:
-    """Robust fallback making direct bedrock.converse calls when higher-level engines fail."""
+    """Generate commentary through the explicitly selected direct Bedrock engine."""
     if image_format_p1 == "jpg":
         image_format_p1 = "jpeg"
     if image_format_p2 == "jpg":
         image_format_p2 = "jpeg"
-    logger.info("Executing direct Bedrock Converse multimodal fallback.")
+    logger.info("Executing direct Bedrock Converse commentary.")
     try:
         bedrock_client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
 
@@ -249,8 +258,12 @@ def direct_bedrock_fallback(
             modelId=BEDROCK_MODEL_ID,
             messages=messages,
             system=[{"text": system_prompt}],
-            inferenceConfig={"maxTokens": 200},
+            inferenceConfig={"maxTokens": COMMENTARY_MAX_TOKENS},
         )
+        if response.get("stopReason") == "max_tokens":
+            raise RuntimeError(
+                f"Bedrock commentary reached {COMMENTARY_MAX_TOKENS} output tokens"
+            )
 
         content = response["output"]["message"]["content"]
         commentary = next(
@@ -262,26 +275,22 @@ def direct_bedrock_fallback(
         logger.info(f"Direct Bedrock commentary generated successfully: {commentary}")
         return commentary
     except Exception as e:
-        logger.error(f"Ultimate direct Bedrock fallback failed: {e}")
-        return "領域干擾！Cursed Energy connection unstable. Give me a moment to gather my nails!"
+        logger.error(f"Direct Bedrock commentary failed: {e}")
+        raise RuntimeError("Direct Bedrock commentary failed") from e
 
 
 def resolve_agentcore_identity(session_id: str, runtime_arn: str) -> tuple[str, str, str]:
     """
-    Resolve the AgentCore/OpenClaw identity (actor_id, user_id, session_id) 
-    to match the fixed, stable fallbacks of the openclaw-character-dashboard,
-    ignoring dynamic session formats like mcpserver_timestamp.
+    Resolve a stable OpenClaw actor and user with an isolated AgentCore session.
     """
     import hashlib
-    
-    # Securely retrieve from environment variables configured by CDK, with safe non-sensitive fallback
+
     actor_id = os.environ.get("AGENTCORE_ACTOR_ID") or os.environ.get("OPENCLAW_SESSION_ID") or "telegram:default"
-        
-    sha1_hash = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()
-    
-    # Establish defaults matching dashboard's defaultAgentCoreUserId/defaultAgentCoreRuntimeSessionId
-    user_id = f"dashboard-user-{sha1_hash[:12]}"
-    compliant_session_id = f"dashboard_session_{sha1_hash[:24]}"
+
+    actor_hash = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()
+    session_hash = hashlib.sha1(f"{actor_id}:{session_id}".encode("utf-8")).hexdigest()
+    user_id = f"dashboard-user-{actor_hash[:12]}"
+    compliant_session_id = f"dashboard_session_{session_hash[:24]}"
     
     logger.info(f"Resolved stable identity: actor_id={actor_id}, user_id={user_id}, compliant_session_id={compliant_session_id}")
     return actor_id, user_id, compliant_session_id
@@ -307,6 +316,16 @@ def generate_ai_commentary(
     if image_format_p2 == "jpg":
         image_format_p2 = "jpeg"
 
+    if agent_engine == "local_direct":
+        return generate_direct_bedrock_commentary(
+            content_block,
+            image_bytes_p1,
+            image_format_p1,
+            image_bytes_p2,
+            image_format_p2,
+            language=language,
+        )
+
     # Build base64 if missing but bytes are present
     if not image_base64_p1 and image_bytes_p1:
         import base64
@@ -316,8 +335,7 @@ def generate_ai_commentary(
         image_base64_p2 = base64.b64encode(image_bytes_p2).decode("utf-8")
 
     # Embed XML tags in content_block for agent container to bypass OpenClaw proxy stripping/flattening
-    runtime_arn_for_check = os.environ.get("OPENCLAW_RUNTIME_ARN") or OPENCLAW_RUNTIME_ARN or os.environ.get("AGENTCORE_RUNTIME_ARN") or AGENTCORE_RUNTIME_ARN
-    is_openclaw_for_tags = agent_engine == "openclaw" or (runtime_arn_for_check and "openclaw" in runtime_arn_for_check.lower())
+    is_openclaw_for_tags = agent_engine == "openclaw"
 
     if is_openclaw_for_tags:
         tags = []
@@ -328,10 +346,6 @@ def generate_ai_commentary(
         if tags:
             content_block = f"{content_block}\n" + "\n".join(tags)
             logger.info("Embedded base64 snapshots in content_block XML tags for OpenClaw")
-
-    env_session_id = os.environ.get("OPENCLAW_SESSION_ID")
-    if env_session_id and agent_engine in ("agentcore_runtime", "openclaw"):
-        session_id = env_session_id
 
     commentary_text = ""
     if agent_engine == "strands_local":
@@ -390,15 +404,8 @@ def generate_ai_commentary(
             commentary_text = str(commentary_response)
             logger.info(f"Strands Local commentary generated: {commentary_text}")
         except Exception as e:
-            logger.error(f"Strands Local Engine failed, falling back: {e}")
-            commentary_text = direct_bedrock_fallback(
-                content_block,
-                image_bytes_p1,
-                image_format_p1,
-                image_bytes_p2,
-                image_format_p2,
-                language=language,
-            )
+            logger.error(f"Strands Local Engine failed: {e}")
+            raise RuntimeError("Strands Local commentary failed") from e
 
     elif agent_engine == "agentcore_runtime" or (
         agent_engine == "openclaw"
@@ -430,13 +437,21 @@ def generate_ai_commentary(
                 )
 
 
-            agent_client = boto3.client("bedrock-agentcore", region_name=BEDROCK_REGION)
+            agent_client = boto3.client(
+                "bedrock-agentcore",
+                region_name=BEDROCK_REGION,
+                config=Config(
+                    connect_timeout=3,
+                    read_timeout=AGENTCORE_READ_TIMEOUT_SECONDS,
+                    retries={"total_max_attempts": 1, "mode": "standard"},
+                ),
+            )
 
             # Check if this is the OpenClaw Runtime (either from the engine type or the ARN name)
             is_openclaw = agent_engine == "openclaw" or "openclaw" in runtime_arn.lower()
 
             if is_openclaw:
-                # OpenClaw case: use fixed, stable session and user IDs matching the dashboard
+                # Keep the dashboard identity while isolating each game session.
                 actor_id, user_id, compliant_session_id = resolve_agentcore_identity(
                     session_id, runtime_arn
                 )
@@ -523,22 +538,16 @@ def generate_ai_commentary(
 
             commentary_text = _extract_agentcore_commentary(agentcore_payload)
             if not commentary_text:
-                commentary_text = "Sorcerer interference detected!"
+                raise ValueError("AgentCore Runtime returned empty commentary")
 
             logger.info(f"AgentCore Runtime response generated: {commentary_text}")
 
         except Exception as e:
             logger.error(f"AgentCore Runtime call failed: {e}")
-            commentary_text = direct_bedrock_fallback(
-                content_block,
-                image_bytes_p1,
-                image_format_p1,
-                image_bytes_p2,
-                image_format_p2,
-                language=language,
-            )
+            engine_name = "OpenClaw" if agent_engine == "openclaw" else "AgentCore"
+            raise RuntimeError(f"{engine_name} runtime failed") from e
 
-    else:  # 'openclaw'
+    elif agent_engine == "openclaw":
         try:
             import urllib3
 
@@ -595,13 +604,9 @@ def generate_ai_commentary(
                 raise Exception(f"OpenClaw returned status code {resp_api.status}")
         except Exception as e:
             logger.error(f"OpenClaw Gateway call failed: {e}")
-            commentary_text = direct_bedrock_fallback(
-                content_block,
-                image_bytes_p1,
-                image_format_p1,
-                image_bytes_p2,
-                image_format_p2,
-                language=language,
-            )
+            raise RuntimeError("OpenClaw gateway failed") from e
+
+    else:
+        raise ValueError(f"Unsupported commentary engine: {agent_engine}")
 
     return commentary_text

@@ -174,7 +174,7 @@ def command(
                 "messageType": message_type,
                 "roomId": "ROOM",
                 "matchId": match_id,
-                "revision": sessions.items.get("v2-room:ROOM", {}).get("revision", 0),
+                "revision": sessions.items.get("room:ROOM", {}).get("revision", 0),
                 "payload": payload,
             },
         },
@@ -215,7 +215,7 @@ def start_playing(
         message_id="start",
     )
     assert response["statusCode"] == 200
-    match_id = sessions.items["v2-room:ROOM"]["matchId"]
+    match_id = sessions.items["room:ROOM"]["matchId"]
     response = command(
         "match.beginCountdown",
         {},
@@ -268,7 +268,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
         message_id="start",
     )
     assert response["statusCode"] == 200
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     match_id = state["matchId"]
     assert state["phase"] == "preparing"
     assert state["config"]["captureSnapshots"] is False
@@ -284,7 +284,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
         match_id=match_id,
     )
     assert response["statusCode"] == 200
-    assert sessions.items["v2-room:ROOM"]["phase"] == "countdown"
+    assert sessions.items["room:ROOM"]["phase"] == "countdown"
 
     response = command(
         "match.countdownCompleted",
@@ -297,7 +297,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
         match_id=match_id,
     )
     assert response["statusCode"] == 200
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     challenge = state["players"]["player1"]["challenge"]
     assert state["phase"] == "playing"
 
@@ -317,7 +317,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
         now=101.0,
     )
     assert response["statusCode"] == 200
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     assert state["phase"] == "resolving"
     assert state["players"]["player1"]["score"] == 1
 
@@ -333,7 +333,7 @@ def test_match_flow_persists_authoritative_state_and_rejects_duplicates():
         now=101.2,
     )
     assert response["statusCode"] == 200
-    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 1
+    assert sessions.items["room:ROOM"]["players"]["player1"]["score"] == 1
 
 
 def test_reconnect_does_not_reset_match():
@@ -350,10 +350,10 @@ def test_reconnect_does_not_reset_match():
         api,
         message_id="start",
     )
-    match_id = sessions.items["v2-room:ROOM"]["matchId"]
+    match_id = sessions.items["room:ROOM"]["matchId"]
 
     join("viewer", "viewer-two", connections, sessions, api, client_id="viewer-two-client")
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     assert state["matchId"] == match_id
     assert state["phase"] == "preparing"
 
@@ -368,7 +368,7 @@ def test_reconnect_does_not_reset_match():
         match_id=match_id,
     )
     assert response["statusCode"] == 400
-    assert sessions.items["v2-room:ROOM"]["phase"] == "preparing"
+    assert sessions.items["room:ROOM"]["phase"] == "preparing"
 
 
 def test_state_helpers_normalize_public_data_and_winner_bounds():
@@ -532,7 +532,7 @@ def test_simultaneous_scores_retry_and_merge_after_conditional_collision():
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    base_state = copy.deepcopy(sessions.items["v2-room:ROOM"])
+    base_state = copy.deepcopy(sessions.items["room:ROOM"])
     p1_challenge = base_state["players"]["player1"]["challenge"]
 
     command(
@@ -549,8 +549,8 @@ def test_simultaneous_scores_retry_and_merge_after_conditional_collision():
         match_id=match_id,
         now=101.0,
     )
-    p1_result = copy.deepcopy(sessions.items["v2-room:ROOM"])
-    sessions.items["v2-room:ROOM"] = base_state
+    p1_result = copy.deepcopy(sessions.items["room:ROOM"])
+    sessions.items["room:ROOM"] = base_state
     sessions.conflict_item = p1_result
     p2_challenge = base_state["players"]["player2"]["challenge"]
 
@@ -569,7 +569,7 @@ def test_simultaneous_scores_retry_and_merge_after_conditional_collision():
         now=101.1,
     )
 
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     assert response["statusCode"] == 200
     assert state["players"]["player1"]["score"] == 1
     assert state["players"]["player2"]["score"] == 1
@@ -584,7 +584,7 @@ def test_write_retry_limit_rejects_without_corrupting_state():
     sessions = SessionsTable()
     api = ApiClient()
     join("viewer", "viewer", connections, sessions, api)
-    before = copy.deepcopy(sessions.items["v2-room:ROOM"])
+    before = copy.deepcopy(sessions.items["room:ROOM"])
     sessions.failures = 3
 
     response = command(
@@ -599,7 +599,7 @@ def test_write_retry_limit_rejects_without_corrupting_state():
 
     assert response["statusCode"] == 400
     assert "exceeded retry limit" in response["body"]
-    assert sessions.items["v2-room:ROOM"] == before
+    assert sessions.items["room:ROOM"] == before
 
 
 def test_score_grace_deadlines_and_stale_commands_are_rejected():
@@ -607,7 +607,7 @@ def test_score_grace_deadlines_and_stale_commands_are_rejected():
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api, score_grace_ms=1000)
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     challenge = state["players"]["player1"]["challenge"]
 
     early_timeout = command(
@@ -669,7 +669,7 @@ def test_score_grace_deadlines_and_stale_commands_are_rejected():
         now=101.0,
     )
     assert success["statusCode"] == 200
-    p2 = sessions.items["v2-room:ROOM"]["players"]["player2"]["challenge"]
+    p2 = sessions.items["room:ROOM"]["players"]["player2"]["challenge"]
     late = command(
         "challenge.succeeded",
         {"challengeId": p2["challengeId"], "technique": p2["technique"]},
@@ -690,7 +690,7 @@ def test_recognition_before_deadline_scores_after_short_delivery_delay():
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+    challenge = sessions.items["room:ROOM"]["players"]["player1"]["challenge"]
 
     response = command(
         "challenge.succeeded",
@@ -709,7 +709,7 @@ def test_recognition_before_deadline_scores_after_short_delivery_delay():
     )
 
     assert response["statusCode"] == 200
-    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 1
+    assert sessions.items["room:ROOM"]["players"]["player1"]["score"] == 1
 
 
 @pytest.mark.parametrize("recognized_at", ["107900", True, float("nan"), float("inf")])
@@ -718,7 +718,7 @@ def test_invalid_recognition_timestamps_are_rejected(recognized_at):
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+    challenge = sessions.items["room:ROOM"]["players"]["player1"]["challenge"]
 
     response = command(
         "challenge.succeeded",
@@ -738,7 +738,7 @@ def test_invalid_recognition_timestamps_are_rejected(recognized_at):
 
     assert response["statusCode"] == 400
     assert response["body"] == "Recognition timestamp is invalid"
-    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 0
+    assert sessions.items["room:ROOM"]["players"]["player1"]["score"] == 0
 
 
 @pytest.mark.parametrize(
@@ -756,7 +756,7 @@ def test_out_of_window_recognition_timestamps_are_rejected(
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+    challenge = sessions.items["room:ROOM"]["players"]["player1"]["challenge"]
 
     response = command(
         "challenge.succeeded",
@@ -776,7 +776,7 @@ def test_out_of_window_recognition_timestamps_are_rejected(
 
     assert response["statusCode"] == 400
     assert response["body"] == reason
-    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["score"] == 0
+    assert sessions.items["room:ROOM"]["players"]["player1"]["score"] == 0
 
 
 @pytest.mark.parametrize(
@@ -808,7 +808,7 @@ def test_challenge_expiry_validation(connection_id, payload, now, reason):
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
     join("viewer", "viewer2", connections, sessions, api, client_id="viewer-2")
-    challenge = sessions.items["v2-room:ROOM"]["players"]["player1"]["challenge"]
+    challenge = sessions.items["room:ROOM"]["players"]["player1"]["challenge"]
 
     response = command(
         "challenge.expire",
@@ -824,7 +824,7 @@ def test_challenge_expiry_validation(connection_id, payload, now, reason):
 
     assert response["statusCode"] == 400
     assert response["body"] == reason
-    assert sessions.items["v2-room:ROOM"]["players"]["player1"]["attempted"] == 0
+    assert sessions.items["room:ROOM"]["players"]["player1"]["attempted"] == 0
 
 
 def test_challenge_expiry_rejects_stale_challenge():
@@ -854,7 +854,7 @@ def test_controlling_viewer_expires_backgrounded_player_challenges():
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
 
     for role in ("player1", "player2"):
         challenge = state["players"][role]["challenge"]
@@ -870,7 +870,7 @@ def test_controlling_viewer_expires_backgrounded_player_challenges():
             now=108.0,
         )
         assert response["statusCode"] == 200
-        state = sessions.items["v2-room:ROOM"]
+        state = sessions.items["room:ROOM"]
 
     assert state["phase"] == "ended"
     assert state["winner"] == "DRAW"
@@ -883,7 +883,7 @@ def test_resolution_cinematic_reset_and_authorization_lifecycle():
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     for role, connection in (("player1", "p1"), ("player2", "p2")):
         challenge = state["players"][role]["challenge"]
         response = command(
@@ -902,7 +902,7 @@ def test_resolution_cinematic_reset_and_authorization_lifecycle():
             now=101.0,
         )
         assert response["statusCode"] == 200
-        state = sessions.items["v2-room:ROOM"]
+        state = sessions.items["room:ROOM"]
 
     early = command(
         "resolution.complete",
@@ -928,7 +928,7 @@ def test_resolution_cinematic_reset_and_authorization_lifecycle():
         now=102.1,
     )
     assert resolved["statusCode"] == 200
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     assert state["phase"] == "cinematic"
     assert state["pendingWinner"] == "DRAW"
 
@@ -956,7 +956,7 @@ def test_resolution_cinematic_reset_and_authorization_lifecycle():
         now=103.0,
     )
     assert completed["statusCode"] == 200
-    assert sessions.items["v2-room:ROOM"]["winner"] == "DRAW"
+    assert sessions.items["room:ROOM"]["winner"] == "DRAW"
 
     unauthorized = command(
         "match.reset",
@@ -978,7 +978,7 @@ def test_resolution_cinematic_reset_and_authorization_lifecycle():
         message_id="reset",
     )
     assert reset["statusCode"] == 200
-    assert sessions.items["v2-room:ROOM"]["phase"] == "idle"
+    assert sessions.items["room:ROOM"]["phase"] == "idle"
 
 
 def test_timeouts_finish_a_draw_and_disconnect_preserves_match():
@@ -986,7 +986,7 @@ def test_timeouts_finish_a_draw_and_disconnect_preserves_match():
     sessions = SessionsTable()
     api = ApiClient()
     match_id = start_playing(connections, sessions, api)
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     for role, connection in (("player1", "p1"), ("player2", "p2")):
         challenge = state["players"][role]["challenge"]
         response = command(
@@ -1001,14 +1001,14 @@ def test_timeouts_finish_a_draw_and_disconnect_preserves_match():
             now=109.0,
         )
         assert response["statusCode"] == 200
-        state = sessions.items["v2-room:ROOM"]
+        state = sessions.items["room:ROOM"]
     assert state["phase"] == "ended"
     assert state["winner"] == "DRAW"
 
     sessions.failures = 1
     response = invoke_route("$disconnect", "p1", connections, sessions, api, now=110.0)
     assert response["statusCode"] == 200
-    assert sessions.items["v2-room:ROOM"]["players"]["player1"] == {
+    assert sessions.items["room:ROOM"]["players"]["player1"] == {
         "connected": False,
         "clientId": None,
         "score": 0,
@@ -1026,7 +1026,7 @@ def test_join_retries_a_conditional_write_collision():
 
     join("player1", "p1", connections, sessions, api)
 
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     assert sessions.put_calls == 2
     assert state["players"]["player1"]["connected"] is True
 
@@ -1036,9 +1036,9 @@ def test_processed_command_history_is_bounded():
     sessions = SessionsTable()
     api = ApiClient()
     join("viewer", "viewer", connections, sessions, api)
-    state = sessions.items["v2-room:ROOM"]
+    state = sessions.items["room:ROOM"]
     state["processedCommands"] = {f"old-{index}": index for index in range(201)}
-    sessions.items["v2-room:ROOM"] = state
+    sessions.items["room:ROOM"] = state
 
     response = command(
         "match.start",
@@ -1051,7 +1051,7 @@ def test_processed_command_history_is_bounded():
     )
 
     assert response["statusCode"] == 200
-    processed = sessions.items["v2-room:ROOM"]["processedCommands"]
+    processed = sessions.items["room:ROOM"]["processedCommands"]
     assert len(processed) == 152
     assert "new" in processed
 
