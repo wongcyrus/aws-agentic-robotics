@@ -9,7 +9,7 @@ import {
   signOut
 } from '../services/auth';
 import { CommentaryPlayer } from '../services/commentary';
-import { loadConfig } from '../services/config';
+import { loadConfig, resolveApiBaseUrl } from '../services/config';
 import { popupOrigin, postToPopup, readPopupMessage } from '../services/popupMessaging';
 import { defaultSettings, loadSettings, roleLabel, saveSettings } from '../services/settings';
 import { AuthGate } from '../components/AuthGate';
@@ -124,14 +124,18 @@ describe('authentication and API client', () => {
 
 describe('configuration, commentary and auth gate', () => {
   it('loads remote config and caches it', async () => {
-    vi.resetModules();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(configured), {
       status: 200, headers: { 'content-type': 'application/json' }
     })));
     const first = await loadConfig();
     const second = await loadConfig();
     expect(first.webSocketUrl).toBe(configured.webSocketUrl);
+    expect(first.apiBaseUrl).toBe(configured.apiBaseUrl);
     expect(second).toBe(first);
+  });
+
+  it('uses the current origin when the configured API URL is empty', () => {
+    expect(resolveApiBaseUrl('')).toBe(location.origin);
   });
 
   it('falls back to browser speech when AWS audio fails', async () => {

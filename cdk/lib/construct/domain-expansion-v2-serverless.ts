@@ -336,7 +336,7 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
         ),
         s3deploy.Source.jsonData("config.json", {
           protocolVersion: "2.0",
-          apiBaseUrl: "",
+          apiBaseUrl: `https://${distribution.distributionDomainName}`,
           webSocketUrl: `wss://${webSocketApi.ref}.execute-api.${Stack.of(this).region}.amazonaws.com/${stage.stageName}`,
           robotApiEndpoint: props.robotApiEndpoint,
           defaultSessionKey: "mcpserver",

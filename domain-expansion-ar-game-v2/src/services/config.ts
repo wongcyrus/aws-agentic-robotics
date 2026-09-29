@@ -13,6 +13,10 @@ const AppConfigSchema = z.object({
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 
+export function resolveApiBaseUrl(configuredUrl: unknown) {
+  return import.meta.env.VITE_API_BASE_URL || (typeof configuredUrl === 'string' ? configuredUrl : '') || location.origin;
+}
+
 let configPromise: Promise<AppConfig> | undefined;
 export function loadConfig() {
   configPromise ??= fetch('/config.json', { cache: 'no-store' })
@@ -21,14 +25,14 @@ export function loadConfig() {
       ...value,
       webSocketUrl: import.meta.env.VITE_WEBSOCKET_URL || value.webSocketUrl ||
         `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/control`,
-      apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? value.apiBaseUrl,
+      apiBaseUrl: resolveApiBaseUrl(value.apiBaseUrl),
       cognitoUserPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID ?? value.cognitoUserPoolId,
       cognitoUserPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID ?? value.cognitoUserPoolClientId,
       cognitoRegion: import.meta.env.VITE_COGNITO_REGION ?? value.cognitoRegion
     }))
     .catch(() => AppConfigSchema.parse({
       webSocketUrl: import.meta.env.VITE_WEBSOCKET_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/control`,
-      apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? location.origin,
+      apiBaseUrl: resolveApiBaseUrl(''),
       cognitoUserPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID ?? '',
       cognitoUserPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID ?? '',
       cognitoRegion: import.meta.env.VITE_COGNITO_REGION ?? ''
