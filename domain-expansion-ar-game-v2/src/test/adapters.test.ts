@@ -127,9 +127,20 @@ describe('browser adapters', () => {
     adapter.draw(canvas, video, [[{ x: .2, y: .3 }]], 'Hollow Purple');
     expect(canvas.width).toBe(1024);
     expect(canvas.height).toBe(768);
+    expect(initVFX).toHaveBeenLastCalledWith(expect.objectContaining({ width: 640, height: 360 }));
     expect(context.drawImage).toHaveBeenCalledWith(video, 0, 0, 1024, 768);
     expect(context.arc).toHaveBeenCalled();
     expect(drawVFX).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), 'Hollow Purple', expect.any(Array));
+  });
+
+  it('keeps the original Hollow Purple two-hand merge sequence', () => {
+    const source = readFileSync(resolve('public/legacy/domain_expansion.js'), 'utf8');
+    const effect = source.match(/applyHollowPurple\(ctx, p1, p2, w, h\) \{([\s\S]*?)\n    \}\n\}/)?.[1];
+    expect(effect).toBeDefined();
+    expect(effect).toContain('if (dist < 200)');
+    expect(effect).toContain('this.applyLapseBlue(ctx, p1)');
+    expect(effect).toContain('this.applyReversalRed(ctx, p2)');
+    expect(effect?.indexOf('if (dist < 200)')).toBeLessThan(effect?.indexOf('this.applyLapseBlue(ctx, p1)') ?? -1);
   });
 
   it('does not render numeric glyphs in the Unlimited Void effect', () => {

@@ -73,8 +73,12 @@ export class CanvasVfxAdapter {
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
-      this.effectsCanvas.width = width;
-      this.effectsCanvas.height = height;
+    }
+    const effectsWidth = canvas.clientWidth || width;
+    const effectsHeight = canvas.clientHeight || height;
+    if (this.effectsCanvas.width !== effectsWidth || this.effectsCanvas.height !== effectsHeight) {
+      this.effectsCanvas.width = effectsWidth;
+      this.effectsCanvas.height = effectsHeight;
       this.engine?.initVFX(this.effectsCanvas);
     }
     const context = canvas.getContext('2d');
