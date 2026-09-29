@@ -241,7 +241,6 @@ const textControlWebConstruct = new TextControlWebConstruct(
       this,
       "DomainExpansionServerlessConstruct",
       {
-        database: databaseConstruct,
         robotSimulatorServerlessConstruct: humanoidRobotSimulatorServerlessConstruct,
         userPool: authenticator.userPool,
         userPoolClient: authenticator.userPoolClient,
@@ -257,6 +256,11 @@ const textControlWebConstruct = new TextControlWebConstruct(
     new cdk.CfnOutput(this, "domainExpansionServerlessWebSocketUrl", {
       description: "The WebSocket URL for Domain Expansion signaling",
       value: domainExpansionServerlessConstruct.webSocketUrl,
+    });
+
+    new cdk.CfnOutput(this, "domainExpansionServerlessRestApiUrl", {
+      description: "The REST API URL for Domain Expansion",
+      value: domainExpansionServerlessConstruct.restApiUrl,
     });
 
     new cdk.CfnOutput(this, "domainExpansionCommentatorRuntimeArn", {

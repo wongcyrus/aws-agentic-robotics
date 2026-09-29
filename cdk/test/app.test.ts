@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from "@jest/globals";
 
 const mockStackConstructor = jest.fn();
-const mockDomainV2StackConstructor = jest.fn();
 const mockSynth = jest.fn();
 const mockExistsSync = jest.fn(() => false);
 const mockReadFileSync = jest.fn();
@@ -24,14 +23,6 @@ jest.mock("../lib/cdk-stack", () => ({
   },
 }));
 
-jest.mock("../lib/domain-expansion-v2-stack", () => ({
-  DomainExpansionV2Stack: class {
-    constructor(...args: unknown[]) {
-      mockDomainV2StackConstructor(...args);
-    }
-  },
-}));
-
 jest.mock("fs", () => ({
   existsSync: mockExistsSync,
   readFileSync: mockReadFileSync,
@@ -41,7 +32,6 @@ describe("CDK app entrypoint", () => {
   beforeEach(() => {
     jest.resetModules();
     mockStackConstructor.mockClear();
-    mockDomainV2StackConstructor.mockClear();
     mockSynth.mockClear();
     mockExistsSync.mockReset().mockReturnValue(false);
     mockReadFileSync.mockReset();
@@ -115,43 +105,4 @@ describe("CDK app entrypoint", () => {
     warnSpy.mockRestore();
   });
 
-  test("creates only the V2 stack from complete deployment context", () => {
-    Object.assign(mockContext, {
-      OnlyDomainV2: "true",
-      DomainV2UserPoolId: "pool",
-      DomainV2UserPoolClientId: "client",
-      DomainV2CommentatorRuntimeArn: "commentator",
-      DomainV2OpenClawRuntimeArn: "openclaw",
-      DomainV2RobotApiEndpoint: "https://robot.example.test",
-      DomainV2RobotGatewayUrl: "https://gateway.example.test",
-    });
-
-    jest.isolateModules(() => {
-      require("../bin/cdk");
-    });
-
-    expect(mockStackConstructor).not.toHaveBeenCalled();
-    expect(mockDomainV2StackConstructor).toHaveBeenCalledWith(
-      expect.anything(),
-      "DomainExpansionV2",
-      expect.objectContaining({
-        stackName: "domain-expansion-v2",
-        userPoolId: "pool",
-        userPoolClientId: "client",
-      })
-    );
-    expect(mockSynth).toHaveBeenCalledTimes(1);
-  });
-
-  test("rejects incomplete V2 deployment context", () => {
-    mockContext.OnlyDomainV2 = "true";
-
-    expect(() => {
-      jest.isolateModules(() => {
-        require("../bin/cdk");
-      });
-    }).toThrow("Missing required CDK context: DomainV2UserPoolId");
-    expect(mockDomainV2StackConstructor).not.toHaveBeenCalled();
-    expect(mockSynth).not.toHaveBeenCalled();
-  });
 });

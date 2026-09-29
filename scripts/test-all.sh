@@ -42,19 +42,9 @@ echo "==> CDK"
     rm -rf coverage
 )
 
-echo "==> Domain Expansion Node helpers"
+echo "==> Domain Expansion React"
 (
     cd "${ROOT_DIR}/domain-expansion-ar-game"
-    node --check server.js
-    node --test --experimental-test-coverage \
-        --test-coverage-lines=90 \
-        --test-coverage-branches=90 \
-        --test-coverage-functions=90
-)
-
-echo "==> Domain Expansion V2 React"
-(
-    cd "${ROOT_DIR}/domain-expansion-ar-game-v2"
     npm test
     npm run build
     npm run test:e2e:local
@@ -65,10 +55,6 @@ run_pytest_coverage "Text control" "text_control" 85
 run_pytest_coverage \
     "Domain Expansion serverless backend" \
     "domain-expansion-ar-game-serverless/backend" \
-    80
-run_pytest_coverage \
-    "Domain Expansion V2 serverless backend" \
-    "domain-expansion-ar-game-v2-serverless/backend" \
     80
 run_pytest_coverage \
     "Domain Expansion commentator AgentCore" \

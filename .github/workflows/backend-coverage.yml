@@ -33,7 +33,6 @@ jobs:
           cache-dependency-path: |
             cdk/package-lock.json
             domain-expansion-ar-game/package-lock.json
-            domain-expansion-ar-game-v2/package-lock.json
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -42,10 +41,9 @@ jobs:
         run: |
           npm ci --prefix cdk
           npm ci --prefix domain-expansion-ar-game
-          npm ci --prefix domain-expansion-ar-game-v2
 
       - name: Install Playwright browser
-        working-directory: domain-expansion-ar-game-v2
+        working-directory: domain-expansion-ar-game
         run: npx playwright install --with-deps chromium
 
       - name: Run static checks

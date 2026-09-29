@@ -152,6 +152,7 @@ jest.mock("../lib/construct/domain-expansion-serverless", () => {
     DomainExpansionServerlessConstruct: class extends Construct {
       public readonly serviceUrl = "domain.example.test";
       public readonly webSocketUrl = "wss://domain.example.test/prod";
+      public readonly restApiUrl = "https://api.domain.example.test/prod/";
       public readonly runtimeArn =
         "arn:aws:bedrock-agentcore:us-east-1:111122223333:runtime/domain";
       public readonly websiteBucket;

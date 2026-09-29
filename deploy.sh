@@ -77,6 +77,9 @@ fi
 
 AWS_USER_ID=$(echo "$AWS_IDENTITY_OUT" | jq -r .UserId 2>/dev/null || aws sts get-caller-identity --query UserId --output text)
 
+npm --prefix "${SCRIPT_DIR}/domain-expansion-ar-game" ci
+npm --prefix "${SCRIPT_DIR}/domain-expansion-ar-game" run build
+
 cd cdk
 npx cdk deploy AwsAgenticRobotics --require-approval never --outputs-file output.json --context AwsUserId="$AWS_USER_ID"
 "${SCRIPT_DIR}/scripts/deployment/validate_cdk_output.sh" output.json \
@@ -92,7 +95,7 @@ WEBSITE_BUCKET=$(jq -r '.[].ServerlessWebsiteBucket' output.json)
 aws s3 sync ../humanoid-robot-simulator-serverless/frontend/video s3://"$WEBSITE_BUCKET"/video
 
 DOMAIN_WEBSITE_BUCKET=$(jq -r '.[].DomainExpansionWebsiteBucket' output.json)
-aws s3 sync ../domain-expansion-ar-game/static/video s3://"$DOMAIN_WEBSITE_BUCKET"/static/video
+aws s3 sync ../domain-expansion-ar-game/public/static/video s3://"$DOMAIN_WEBSITE_BUCKET"/static/video
 
 post_deploy_args=(output.json --timeout "$CHECK_TIMEOUT")
 if [[ "$CHECK_HEALTH" == true ]]; then

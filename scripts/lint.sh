@@ -11,7 +11,6 @@ uv run --project "${ROOT_DIR}" --group dev ruff check \
     --exclude '*.venv/*' \
     "${ROOT_DIR}/text_control" \
     "${ROOT_DIR}/domain-expansion-ar-game-serverless/backend" \
-    "${ROOT_DIR}/domain-expansion-ar-game-v2-serverless/backend" \
     "${ROOT_DIR}/domain-expansion-commentator-agentcore" \
     "${ROOT_DIR}/humanoid-robot-simulator-serverless/backend" \
     "${ROOT_DIR}/mcp_server" \
@@ -37,10 +36,6 @@ uv run --project "${ROOT_DIR}" --group dev ruff format --check \
 
 uv run --project "${ROOT_DIR}" --group dev mypy \
     --config-file "${ROOT_DIR}/pyproject.toml" \
-    "${ROOT_DIR}/domain-expansion-ar-game-v2-serverless/backend/websocket_handler.py"
-
-uv run --project "${ROOT_DIR}" --group dev mypy \
-    --config-file "${ROOT_DIR}/pyproject.toml" \
     "${ROOT_DIR}/text_control/services/chat_orchestration.py" \
     "${ROOT_DIR}/text_control/services/robot_api.py" \
     "${ROOT_DIR}/text_control/utils/observability.py" \
@@ -53,8 +48,6 @@ uv run --project "${ROOT_DIR}" --group dev mypy \
     npm run lint
     npm run typecheck
 )
-
-node --check "${ROOT_DIR}/domain-expansion-ar-game/server.js"
 
 bash -n \
     "${ROOT_DIR}/deploy.sh" \

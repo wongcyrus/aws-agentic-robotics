@@ -236,23 +236,7 @@ describe("AgentCore-backed constructs", () => {
 
   test("domain expansion configures authenticated APIs and explicit public endpoints", () => {
     const { imageSpy, sourceSpy } = mockLocalAssets();
-    const fsModule = require("fs") as typeof import("fs");
-    const originalExistsSync = fsModule.existsSync;
-    const originalReadFileSync = fsModule.readFileSync;
-    const existsSpy = jest.spyOn(fsModule, "existsSync");
-    const readSpy = jest.spyOn(fsModule, "readFileSync");
-    existsSpy.mockImplementation((filePath) =>
-      String(filePath).endsWith("/cdk/.env")
-        ? true
-        : originalExistsSync(filePath)
-    );
-    readSpy.mockImplementation((filePath, options) =>
-      String(filePath).endsWith("/cdk/.env")
-        ? ("# test settings\nMALFORMED\nOPENCLAW_SESSION_ID='telegram:test=room'\nIGNORED=x\n" as never)
-        : originalReadFileSync(filePath, options as never)
-    );
     const testStack = stack("DomainStack");
-    const database = new DatabaseConstruct(testStack, "Database");
     const userPool = new cognito.UserPool(testStack, "UserPool");
     const userPoolClient = new cognito.UserPoolClient(
       testStack,
@@ -265,7 +249,6 @@ describe("AgentCore-backed constructs", () => {
       testStack,
       "Domain",
       {
-        database,
         robotSimulatorServerlessConstruct: {
           serviceUrl: "simulator.example.test",
         } as never,
@@ -277,8 +260,6 @@ describe("AgentCore-backed constructs", () => {
         } as never,
       }
     );
-    existsSpy.mockRestore();
-    readSpy.mockRestore();
     imageSpy.mockRestore();
     sourceSpy.mockRestore();
 
@@ -305,7 +286,8 @@ describe("AgentCore-backed constructs", () => {
       Runtime: "python3.12",
       Environment: {
         Variables: Match.objectLike({
-          OPENCLAW_SESSION_ID: "telegram:test=room",
+          OPENCLAW_SESSION_ID: "telegram:default",
+          OPENCLAW_AGENT_ID: "main",
           ROBOT_API_ENDPOINT: "https://simulator.example.test",
           McpServerGatewayUrl: "https://gateway.example.test",
           DEFAULT_SESSION_KEY: "mcpserver",
@@ -343,7 +325,6 @@ describe("AgentCore-backed constructs", () => {
             },
           ],
         },
-        // Both buckets intentionally serve browser content; public ACLs stay blocked.
         PublicAccessBlockConfiguration: {
           BlockPublicAcls: true,
           BlockPublicPolicy: false,
@@ -351,7 +332,7 @@ describe("AgentCore-backed constructs", () => {
           RestrictPublicBuckets: false,
         },
       }),
-      2
+      1
     );
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       AuthorizationType: "CUSTOM",
@@ -372,104 +353,4 @@ describe("AgentCore-backed constructs", () => {
     expect(policies).toContain("execute-api:ManageConnections");
   });
 
-  test("domain expansion falls back to the default OpenClaw session after dotenv errors", () => {
-    const { imageSpy, sourceSpy } = mockLocalAssets();
-    const fsModule = require("fs") as typeof import("fs");
-    const originalExistsSync = fsModule.existsSync;
-    const originalReadFileSync = fsModule.readFileSync;
-    const existsSpy = jest
-      .spyOn(fsModule, "existsSync")
-      .mockImplementation((filePath) =>
-        String(filePath).endsWith("/cdk/.env")
-          ? true
-          : originalExistsSync(filePath)
-      );
-    const readSpy = jest
-      .spyOn(fsModule, "readFileSync")
-      .mockImplementation((filePath, options) => {
-        if (String(filePath).endsWith("/cdk/.env")) {
-          throw new Error("unreadable");
-        }
-        return originalReadFileSync(filePath, options as never);
-      });
-    const warnSpy = jest
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined);
-    const testStack = stack("DomainDefaultSessionStack");
-    const database = new DatabaseConstruct(testStack, "Database");
-    const userPool = new cognito.UserPool(testStack, "UserPool");
-    const userPoolClient = new cognito.UserPoolClient(
-      testStack,
-      "UserPoolClient",
-      { userPool }
-    );
-
-    new DomainExpansionServerlessConstruct(testStack, "Domain", {
-      database,
-      robotSimulatorServerlessConstruct: {
-        serviceUrl: "simulator.example.test",
-      } as never,
-      userPool,
-      userPoolClient,
-      robotGatewayConstruct: {
-        gatewayUrl: "https://gateway.example.test",
-        grantInvokeGateway: jest.fn(),
-      } as never,
-    });
-
-    const lambdaProps = mockAgentcorePythonFunctionProps.find(
-      (props) =>
-        (props.environment as Record<string, string>).OPENCLAW_SESSION_ID ===
-        "telegram:default"
-    );
-    expect(lambdaProps).toBeDefined();
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Failed to parse .env file:",
-      expect.any(Error)
-    );
-
-    warnSpy.mockClear();
-    existsSpy.mockImplementation((filePath) =>
-      String(filePath).endsWith("/cdk/.env")
-        ? false
-        : originalExistsSync(filePath)
-    );
-    readSpy.mockImplementation((filePath, options) =>
-      originalReadFileSync(filePath, options as never)
-    );
-    const absentEnvStack = stack("DomainAbsentEnvStack");
-    const absentDatabase = new DatabaseConstruct(absentEnvStack, "Database");
-    const absentUserPool = new cognito.UserPool(absentEnvStack, "UserPool");
-    const absentUserPoolClient = new cognito.UserPoolClient(
-      absentEnvStack,
-      "UserPoolClient",
-      { userPool: absentUserPool }
-    );
-    new DomainExpansionServerlessConstruct(absentEnvStack, "Domain", {
-      database: absentDatabase,
-      robotSimulatorServerlessConstruct: {
-        serviceUrl: "simulator.example.test",
-      } as never,
-      userPool: absentUserPool,
-      userPoolClient: absentUserPoolClient,
-      robotGatewayConstruct: {
-        gatewayUrl: "https://gateway.example.test",
-        grantInvokeGateway: jest.fn(),
-      } as never,
-    });
-    expect(warnSpy).not.toHaveBeenCalled();
-    expect(
-      (
-        mockAgentcorePythonFunctionProps[
-          mockAgentcorePythonFunctionProps.length - 1
-        ].environment as Record<string, string>
-      ).OPENCLAW_SESSION_ID
-    ).toBe("telegram:default");
-
-    existsSpy.mockRestore();
-    readSpy.mockRestore();
-    warnSpy.mockRestore();
-    imageSpy.mockRestore();
-    sourceSpy.mockRestore();
-  });
 });
