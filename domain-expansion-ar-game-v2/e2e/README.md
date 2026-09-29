@@ -55,14 +55,20 @@ through the authenticated REST API:
 
 ```sh
 COMMENTARY_BASE_URL=https://frontend.example \
-COMMENTARY_ID_TOKEN='temporary-cognito-id-token' \
 npm run test:commentary:aws
 ```
 
 The test runs each engine sequentially, requires HTTP 200 and non-empty
 commentary, verifies the reported engine, and prints response latency. It does
-not attach webcam images or request Polly audio. The token is read only from the
-environment and is not written to reports.
+not attach webcam images or request Polly audio. Using the standard AWS SDK
+credential chain, it reads Cognito IDs from the deployed `config.json`, creates
+a temporary verified user, authenticates for an ID token, and deletes the user
+in cleanup. The caller therefore needs Cognito permissions for
+`AdminCreateUser`, `AdminSetUserPassword`, `AdminInitiateAuth`, and
+`AdminDeleteUser`.
+
+`COMMENTARY_ID_TOKEN` remains available as an override for environments that
+must not create temporary users.
 
 To trigger selected engines or change the client timeout:
 
@@ -70,6 +76,5 @@ To trigger selected engines or change the client timeout:
 COMMENTARY_ENGINES=openclaw,agentcore_runtime \
 COMMENTARY_TIMEOUT_MS=65000 \
 COMMENTARY_BASE_URL=https://frontend.example \
-COMMENTARY_ID_TOKEN='temporary-cognito-id-token' \
 npm run test:commentary:aws
 ```

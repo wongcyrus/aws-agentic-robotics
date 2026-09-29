@@ -16,6 +16,77 @@ const selectedEngines = () => {
   return engines;
 };
 
+const loadCognitoConfig = async (baseUrl) => {
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/config.json`, {
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (!response.ok) {
+    throw new Error(`Unable to load deployed Cognito config: HTTP ${response.status}`);
+  }
+  const config = await response.json();
+  const region = process.env.COMMENTARY_COGNITO_REGION?.trim() || config.cognitoRegion;
+  const userPoolId = process.env.COMMENTARY_USER_POOL_ID?.trim() || config.cognitoUserPoolId;
+  const clientId = process.env.COMMENTARY_USER_POOL_CLIENT_ID?.trim() || config.cognitoUserPoolClientId;
+  if (!region || !userPoolId || !clientId) {
+    throw new Error('Deployed config is missing Cognito region, user pool ID, or client ID');
+  }
+  return { region, userPoolId, clientId };
+};
+
+const createTemporaryAuthentication = async (baseUrl) => {
+  const { region, userPoolId, clientId } = await loadCognitoConfig(baseUrl);
+  const cognito = new CognitoIdentityProviderClient({ region, maxAttempts: 3 });
+  const suffix = `${Date.now().toString(36)}-${randomBytes(6).toString('hex')}`;
+  const username = `commentary-e2e+${suffix}@example.invalid`;
+  const password = `Commentary-${randomBytes(18).toString('base64url')}Aa1!`;
+  let created = false;
+
+  try {
+    await cognito.send(new AdminCreateUserCommand({
+      UserPoolId: userPoolId,
+      Username: username,
+      MessageAction: 'SUPPRESS',
+      UserAttributes: [
+        { Name: 'email', Value: username },
+        { Name: 'email_verified', Value: 'true' }
+      ]
+    }));
+    created = true;
+    await cognito.send(new AdminSetUserPasswordCommand({
+      UserPoolId: userPoolId,
+      Username: username,
+      Password: password,
+      Permanent: true
+    }));
+    const authentication = await cognito.send(new AdminInitiateAuthCommand({
+      UserPoolId: userPoolId,
+      ClientId: clientId,
+      AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
+      AuthParameters: {
+        USERNAME: username,
+        PASSWORD: password
+      }
+    }));
+    const token = authentication.AuthenticationResult?.IdToken;
+    if (!token) throw new Error('Cognito did not return an ID token');
+    return {
+      token,
+      cleanup: () => cognito.send(new AdminDeleteUserCommand({
+        UserPoolId: userPoolId,
+        Username: username
+      }))
+    };
+  } catch (error) {
+    if (created) {
+      await cognito.send(new AdminDeleteUserCommand({
+        UserPoolId: userPoolId,
+        Username: username
+      }));
+    }
+    throw error;
+  }
+};
+
 const invokeCommentary = async ({ baseUrl, token, engine, timeoutMs }) => {
   const sessionId = `aws-commentary-${engine}-${Date.now().toString(36)}`;
   const startedAt = performance.now();
@@ -73,24 +144,34 @@ export const runCommentarySmoke = async () => {
     'PLAYWRIGHT_API_BASE_URL',
     'PLAYWRIGHT_BASE_URL'
   ]);
-  const token = requiredEnvironment('COMMENTARY_ID_TOKEN', ['PLAYWRIGHT_COGNITO_ID_TOKEN']);
+  const configuredToken =
+    process.env.COMMENTARY_ID_TOKEN?.trim() ||
+    process.env.PLAYWRIGHT_COGNITO_ID_TOKEN?.trim();
   const timeoutMs = Number(process.env.COMMENTARY_TIMEOUT_MS ?? 65_000);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error('COMMENTARY_TIMEOUT_MS must be a positive number');
   }
 
-  const failures = [];
-  for (const engine of selectedEngines()) {
-    try {
-      const result = await invokeCommentary({ baseUrl, token, engine, timeoutMs });
-      console.log(`PASS ${result.engine} ${result.elapsedMs}ms: ${result.commentary.slice(0, 120)}`);
-    } catch (error) {
-      failures.push(error instanceof Error ? error.message : String(error));
-      console.error(`FAIL ${engine}: ${failures.at(-1)}`);
+  const temporaryAuthentication = configuredToken
+    ? null
+    : await createTemporaryAuthentication(baseUrl);
+  const token = configuredToken || temporaryAuthentication.token;
+  try {
+    const failures = [];
+    for (const engine of selectedEngines()) {
+      try {
+        const result = await invokeCommentary({ baseUrl, token, engine, timeoutMs });
+        console.log(`PASS ${result.engine} ${result.elapsedMs}ms: ${result.commentary.slice(0, 120)}`);
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+        console.error(`FAIL ${engine}: ${failures.at(-1)}`);
+      }
     }
-  }
-  if (failures.length) {
-    throw new Error(`${failures.length} commentary integration test(s) failed`);
+    if (failures.length) {
+      throw new Error(`${failures.length} commentary integration test(s) failed`);
+    }
+  } finally {
+    await temporaryAuthentication?.cleanup();
   }
 };
 
@@ -100,4 +181,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exitCode = 1;
   });
 }
+import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import {
+  AdminCreateUserCommand,
+  AdminDeleteUserCommand,
+  AdminInitiateAuthCommand,
+  AdminSetUserPasswordCommand,
+  CognitoIdentityProviderClient
+} from '@aws-sdk/client-cognito-identity-provider';
