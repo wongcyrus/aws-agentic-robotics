@@ -223,6 +223,8 @@ def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch
     assert payload["image_format"] == "jpeg"
     assert payload["image_p2"] == "two"
     assert payload["session_id"] == calls[0]["runtimeSessionId"]
+    assert payload["agentId"] == "main"
+    assert payload["model"] == "openclaw/main"
     assert client_configs[0].read_timeout == commentary.AGENTCORE_READ_TIMEOUT_SECONDS
     assert client_configs[0].connect_timeout == 3
 

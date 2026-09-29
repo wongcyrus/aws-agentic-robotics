@@ -132,6 +132,7 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
         AGENTCORE_RUNTIME_ARN: props.commentatorRuntimeArn,
         OPENCLAW_RUNTIME_ARN: props.openClawRuntimeArn,
         OPENCLAW_SESSION_ID: "telegram:default",
+        OPENCLAW_AGENT_ID: "main",
         BEDROCK_MODEL_ID: "global.moonshotai.kimi-k3",
         COMMENTARY_MAX_TOKENS: "1600",
         AGENTCORE_READ_TIMEOUT_SECONDS: "50",
