@@ -208,7 +208,7 @@ Maintain her personality:
     return f"{identity}\n\n{soul}"
 
 
-def direct_bedrock_fallback(
+def generate_direct_bedrock_commentary(
     prompt: str,
     image_bytes_p1: bytes = None,
     image_format_p1: str = "jpeg",
@@ -216,12 +216,12 @@ def direct_bedrock_fallback(
     image_format_p2: str = "jpeg",
     language: str = "zh-HK",
 ) -> str:
-    """Robust fallback making direct bedrock.converse calls when higher-level engines fail."""
+    """Generate commentary through the explicitly selected direct Bedrock engine."""
     if image_format_p1 == "jpg":
         image_format_p1 = "jpeg"
     if image_format_p2 == "jpg":
         image_format_p2 = "jpeg"
-    logger.info("Executing direct Bedrock Converse multimodal fallback.")
+    logger.info("Executing direct Bedrock Converse commentary.")
     try:
         bedrock_client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
 
@@ -275,7 +275,7 @@ def direct_bedrock_fallback(
         logger.info(f"Direct Bedrock commentary generated successfully: {commentary}")
         return commentary
     except Exception as e:
-        logger.error(f"Ultimate direct Bedrock fallback failed: {e}")
+        logger.error(f"Direct Bedrock commentary failed: {e}")
         raise RuntimeError("Direct Bedrock commentary failed") from e
 
 
@@ -317,7 +317,7 @@ def generate_ai_commentary(
         image_format_p2 = "jpeg"
 
     if agent_engine == "local_direct":
-        return direct_bedrock_fallback(
+        return generate_direct_bedrock_commentary(
             content_block,
             image_bytes_p1,
             image_format_p1,
@@ -404,15 +404,8 @@ def generate_ai_commentary(
             commentary_text = str(commentary_response)
             logger.info(f"Strands Local commentary generated: {commentary_text}")
         except Exception as e:
-            logger.error(f"Strands Local Engine failed, falling back: {e}")
-            commentary_text = direct_bedrock_fallback(
-                content_block,
-                image_bytes_p1,
-                image_format_p1,
-                image_bytes_p2,
-                image_format_p2,
-                language=language,
-            )
+            logger.error(f"Strands Local Engine failed: {e}")
+            raise RuntimeError("Strands Local commentary failed") from e
 
     elif agent_engine == "agentcore_runtime" or (
         agent_engine == "openclaw"
@@ -545,24 +538,16 @@ def generate_ai_commentary(
 
             commentary_text = _extract_agentcore_commentary(agentcore_payload)
             if not commentary_text:
-                commentary_text = "Sorcerer interference detected!"
+                raise ValueError("AgentCore Runtime returned empty commentary")
 
             logger.info(f"AgentCore Runtime response generated: {commentary_text}")
 
         except Exception as e:
             logger.error(f"AgentCore Runtime call failed: {e}")
-            if agent_engine == "openclaw":
-                raise RuntimeError("OpenClaw runtime failed") from e
-            commentary_text = direct_bedrock_fallback(
-                content_block,
-                image_bytes_p1,
-                image_format_p1,
-                image_bytes_p2,
-                image_format_p2,
-                language=language,
-            )
+            engine_name = "OpenClaw" if agent_engine == "openclaw" else "AgentCore"
+            raise RuntimeError(f"{engine_name} runtime failed") from e
 
-    else:  # 'openclaw'
+    elif agent_engine == "openclaw":
         try:
             import urllib3
 
@@ -619,13 +604,9 @@ def generate_ai_commentary(
                 raise Exception(f"OpenClaw returned status code {resp_api.status}")
         except Exception as e:
             logger.error(f"OpenClaw Gateway call failed: {e}")
-            commentary_text = direct_bedrock_fallback(
-                content_block,
-                image_bytes_p1,
-                image_format_p1,
-                image_bytes_p2,
-                image_format_p2,
-                language=language,
-            )
+            raise RuntimeError("OpenClaw gateway failed") from e
+
+    else:
+        raise ValueError(f"Unsupported commentary engine: {agent_engine}")
 
     return commentary_text
