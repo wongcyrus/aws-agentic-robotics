@@ -504,8 +504,8 @@ def handle_http(event):
                 language=commentary_language
             )
 
-        # ALWAYS call digital human (xiaoice) speak for strand local, agentcore, and openclaw responses
-        if commentary_text and agent_engine in ("strands_local", "agentcore_runtime", "openclaw"):
+        # OpenClaw already handles its own delivery; avoid extending the synchronous REST request.
+        if commentary_text and agent_engine in ("strands_local", "agentcore_runtime"):
             invoke_agentcore_gateway_tool(
                 tool_name="digital-human-mcp-lambda___digital_human_speech",
                 arguments={"message": commentary_text}

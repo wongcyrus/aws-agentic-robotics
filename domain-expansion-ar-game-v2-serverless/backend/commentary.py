@@ -4,6 +4,7 @@ import os
 import re
 
 import boto3
+from botocore.config import Config
 
 logger = logging.getLogger()
 
@@ -22,6 +23,9 @@ COMMENTARY_MAX_TOKENS = int(
 )
 AGENTCORE_RUNTIME_ARN = os.environ.get("AGENTCORE_RUNTIME_ARN", "")
 OPENCLAW_RUNTIME_ARN = os.environ.get("OPENCLAW_RUNTIME_ARN", "")
+AGENTCORE_READ_TIMEOUT_SECONDS = int(
+    os.environ.get("AGENTCORE_READ_TIMEOUT_SECONDS", "50")
+)
 
 
 def _build_openclaw_content_block(
@@ -277,20 +281,16 @@ def direct_bedrock_fallback(
 
 def resolve_agentcore_identity(session_id: str, runtime_arn: str) -> tuple[str, str, str]:
     """
-    Resolve the AgentCore/OpenClaw identity (actor_id, user_id, session_id) 
-    to match the fixed, stable fallbacks of the openclaw-character-dashboard,
-    ignoring dynamic session formats like mcpserver_timestamp.
+    Resolve a stable OpenClaw actor and user with an isolated AgentCore session.
     """
     import hashlib
-    
-    # Securely retrieve from environment variables configured by CDK, with safe non-sensitive fallback
+
     actor_id = os.environ.get("AGENTCORE_ACTOR_ID") or os.environ.get("OPENCLAW_SESSION_ID") or "telegram:default"
-        
-    sha1_hash = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()
-    
-    # Establish defaults matching dashboard's defaultAgentCoreUserId/defaultAgentCoreRuntimeSessionId
-    user_id = f"dashboard-user-{sha1_hash[:12]}"
-    compliant_session_id = f"dashboard_session_{sha1_hash[:24]}"
+
+    actor_hash = hashlib.sha1(actor_id.encode("utf-8")).hexdigest()
+    session_hash = hashlib.sha1(f"{actor_id}:{session_id}".encode("utf-8")).hexdigest()
+    user_id = f"dashboard-user-{actor_hash[:12]}"
+    compliant_session_id = f"dashboard_session_{session_hash[:24]}"
     
     logger.info(f"Resolved stable identity: actor_id={actor_id}, user_id={user_id}, compliant_session_id={compliant_session_id}")
     return actor_id, user_id, compliant_session_id
@@ -335,8 +335,7 @@ def generate_ai_commentary(
         image_base64_p2 = base64.b64encode(image_bytes_p2).decode("utf-8")
 
     # Embed XML tags in content_block for agent container to bypass OpenClaw proxy stripping/flattening
-    runtime_arn_for_check = os.environ.get("OPENCLAW_RUNTIME_ARN") or OPENCLAW_RUNTIME_ARN or os.environ.get("AGENTCORE_RUNTIME_ARN") or AGENTCORE_RUNTIME_ARN
-    is_openclaw_for_tags = agent_engine == "openclaw" or (runtime_arn_for_check and "openclaw" in runtime_arn_for_check.lower())
+    is_openclaw_for_tags = agent_engine == "openclaw"
 
     if is_openclaw_for_tags:
         tags = []
@@ -347,10 +346,6 @@ def generate_ai_commentary(
         if tags:
             content_block = f"{content_block}\n" + "\n".join(tags)
             logger.info("Embedded base64 snapshots in content_block XML tags for OpenClaw")
-
-    env_session_id = os.environ.get("OPENCLAW_SESSION_ID")
-    if env_session_id and agent_engine in ("agentcore_runtime", "openclaw"):
-        session_id = env_session_id
 
     commentary_text = ""
     if agent_engine == "strands_local":
@@ -449,13 +444,21 @@ def generate_ai_commentary(
                 )
 
 
-            agent_client = boto3.client("bedrock-agentcore", region_name=BEDROCK_REGION)
+            agent_client = boto3.client(
+                "bedrock-agentcore",
+                region_name=BEDROCK_REGION,
+                config=Config(
+                    connect_timeout=3,
+                    read_timeout=AGENTCORE_READ_TIMEOUT_SECONDS,
+                    retries={"total_max_attempts": 1, "mode": "standard"},
+                ),
+            )
 
             # Check if this is the OpenClaw Runtime (either from the engine type or the ARN name)
             is_openclaw = agent_engine == "openclaw" or "openclaw" in runtime_arn.lower()
 
             if is_openclaw:
-                # OpenClaw case: use fixed, stable session and user IDs matching the dashboard
+                # Keep the dashboard identity while isolating each game session.
                 actor_id, user_id, compliant_session_id = resolve_agentcore_identity(
                     session_id, runtime_arn
                 )
@@ -548,6 +551,8 @@ def generate_ai_commentary(
 
         except Exception as e:
             logger.error(f"AgentCore Runtime call failed: {e}")
+            if agent_engine == "openclaw":
+                raise RuntimeError("OpenClaw runtime failed") from e
             commentary_text = direct_bedrock_fallback(
                 content_block,
                 image_bytes_p1,

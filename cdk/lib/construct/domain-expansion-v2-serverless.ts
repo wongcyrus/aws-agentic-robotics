@@ -118,7 +118,7 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
       index: "lambda_function.py",
       handler: "lambda_handler",
       runtime: SHARED_PYTHON_RUNTIME,
-      timeout: Duration.seconds(45),
+      timeout: Duration.seconds(55),
       memorySize: 512,
       logGroup: createDestroyableLambdaLogGroup(this, "BackendLogGroup"),
       bundling: SHARED_PYTHON_BUNDLING,
@@ -134,6 +134,7 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
         OPENCLAW_SESSION_ID: "telegram:default",
         BEDROCK_MODEL_ID: "global.moonshotai.kimi-k3",
         COMMENTARY_MAX_TOKENS: "1600",
+        AGENTCORE_READ_TIMEOUT_SECONDS: "50",
         BEDROCK_REGION: Stack.of(this).region,
         PHOTOS_S3_BUCKET: photosBucket.bucketName,
         PHOTOS_S3_DOMAIN: photosBucket.bucketRegionalDomainName,
@@ -195,7 +196,9 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
       "RestAuthorizer",
       { cognitoUserPools: [userPool] }
     );
-    const integration = new apigateway.LambdaIntegration(lambdaFunction);
+    const integration = new apigateway.LambdaIntegration(lambdaFunction, {
+      timeout: Duration.seconds(60),
+    });
     const api = restApi.root.addResource("api");
     const publicGetRoutes = ["get-snapshot", "last-image"];
     const authenticatedPostRoutes = [
@@ -304,7 +307,9 @@ export class DomainExpansionV2ServerlessConstruct extends Construct {
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
       },
     });
-    const apiOrigin = new origins.RestApiOrigin(restApi);
+    const apiOrigin = new origins.RestApiOrigin(restApi, {
+      readTimeout: Duration.seconds(60),
+    });
     const dynamicBehavior: cloudfront.BehaviorOptions = {
       origin: apiOrigin,
       viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,

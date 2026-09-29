@@ -126,13 +126,16 @@ def test_local_direct_bypasses_agent_runtimes(monkeypatch):
     assert commentary.generate_ai_commentary("local_direct", "fight") == "direct commentary"
 
 
-def test_resolve_agentcore_identity_is_stable(monkeypatch):
+def test_resolve_agentcore_identity_keeps_actor_stable_and_isolates_sessions(monkeypatch):
     monkeypatch.setenv("AGENTCORE_ACTOR_ID", "telegram:user")
     first = commentary.resolve_agentcore_identity("one", "arn")
+    same = commentary.resolve_agentcore_identity("one", "arn")
     second = commentary.resolve_agentcore_identity("two", "arn")
-    assert first == second
+    assert first == same
     assert first[0] == "telegram:user"
     assert first[1].startswith("dashboard-user-")
+    assert first[:2] == second[:2]
+    assert first[2] != second[2]
 
 
 def test_generate_agentcore_commentary_parses_response(monkeypatch):
@@ -190,11 +193,16 @@ def test_generate_agentcore_commentary_handles_response_body_variants(
 
 def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch):
     calls = []
+    client_configs = []
     client = SimpleNamespace(
         invoke_agent_runtime=lambda **kwargs: calls.append(kwargs)
         or {"response": b'{"response":"openclaw runtime answer"}'}
     )
-    monkeypatch.setattr(commentary.boto3, "client", lambda *args, **kwargs: client)
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: client_configs.append(kwargs["config"]) or client,
+    )
     monkeypatch.setenv("OPENCLAW_RUNTIME_ARN", "arn:openclaw-runtime")
     monkeypatch.setenv("OPENCLAW_SESSION_ID", "stable-session")
 
@@ -215,6 +223,34 @@ def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch
     assert payload["image_format"] == "jpeg"
     assert payload["image_p2"] == "two"
     assert payload["session_id"] == calls[0]["runtimeSessionId"]
+    assert client_configs[0].read_timeout == commentary.AGENTCORE_READ_TIMEOUT_SECONDS
+    assert client_configs[0].connect_timeout == 3
+
+
+def test_generate_openclaw_timeout_does_not_fallback(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_RUNTIME_ARN", "arn:openclaw-runtime")
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(
+            invoke_agent_runtime=lambda **kwargs: (_ for _ in ()).throw(TimeoutError("slow"))
+        ),
+    )
+    monkeypatch.setattr(
+        commentary,
+        "direct_bedrock_fallback",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("OpenClaw must not fall back")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="OpenClaw runtime failed"):
+        commentary.generate_ai_commentary(
+            "openclaw",
+            "fight",
+            session_id="match-one",
+            image_base64_p1="encoded-image",
+        )
 
 
 def test_generate_agentcore_without_runtime_arn_falls_back(monkeypatch):

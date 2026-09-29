@@ -210,6 +210,35 @@ def test_local_tts_reuses_supplied_commentary_without_model_call(monkeypatch):
     assert body["audioUrl"] == "https://audio"
 
 
+def test_openclaw_commentary_skips_duplicate_gateway_delivery(monkeypatch):
+    gateway_calls = []
+    monkeypatch.setattr(commentary, "translate_detail", lambda text: text)
+    monkeypatch.setattr(commentary, "generate_ai_commentary", lambda **kwargs: "OpenClaw!")
+    monkeypatch.setattr(
+        lambda_function,
+        "invoke_agentcore_gateway_tool",
+        lambda **kwargs: gateway_calls.append(kwargs),
+    )
+
+    response = lambda_function.handle_http(
+        {
+            "path": "/api/live-status",
+            "httpMethod": "POST",
+            "body": json.dumps(
+                {
+                    "sessionId": "match-one",
+                    "agent_type": "openclaw",
+                    "agentImagePolicy": "never",
+                    "ttsMode": "browser",
+                }
+            ),
+        }
+    )
+
+    assert _body(response)["commentary"] == "OpenClaw!"
+    assert gateway_calls == []
+
+
 def test_battle_result_marks_reset_and_falls_back_to_browser_tts(monkeypatch):
     monkeypatch.setattr(commentary, "translate_detail", lambda text: text)
     monkeypatch.setattr(commentary, "generate_ai_commentary", lambda **kwargs: "Winner!")
