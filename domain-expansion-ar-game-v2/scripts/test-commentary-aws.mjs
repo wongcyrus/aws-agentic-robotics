@@ -1,11 +1,39 @@
-const supportedEngines = new Set(['strands_local', 'agentcore_runtime', 'openclaw']);
+import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  AdminCreateUserCommand,
+  AdminDeleteUserCommand,
+  AdminInitiateAuthCommand,
+  AdminSetUserPasswordCommand,
+  CognitoIdentityProviderClient
+} from '@aws-sdk/client-cognito-identity-provider';
 
-const requiredEnvironment = (name, aliases = []) => {
-  for (const key of [name, ...aliases]) {
-    const value = process.env[key]?.trim();
-    if (value) return value;
+const supportedEngines = new Set(['strands_local', 'agentcore_runtime', 'openclaw']);
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+
+const resolveBaseUrl = async () => {
+  for (const key of ['COMMENTARY_BASE_URL', 'PLAYWRIGHT_API_BASE_URL', 'PLAYWRIGHT_BASE_URL']) {
+    const configured = process.env[key]?.trim();
+    if (configured) return configured;
   }
-  throw new Error(`${[name, ...aliases].join(' or ')} is required`);
+
+  const outputPath = process.env.COMMENTARY_CDK_OUTPUT?.trim() ||
+    resolve(scriptDirectory, '../../cdk/output-domain-v2.json');
+  let output;
+  try {
+    output = JSON.parse(await readFile(outputPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Unable to read CDK output ${outputPath}`, { cause: error });
+  }
+  const stackOutput = Object.values(output).find(
+    (value) => value && typeof value === 'object' && typeof value.DomainExpansionV2Url === 'string'
+  );
+  if (!stackOutput) {
+    throw new Error(`DomainExpansionV2Url is missing from CDK output ${outputPath}`);
+  }
+  return stackOutput.DomainExpansionV2Url;
 };
 
 const selectedEngines = () => {
@@ -140,10 +168,7 @@ const invokeCommentary = async ({ baseUrl, token, engine, timeoutMs }) => {
 };
 
 export const runCommentarySmoke = async () => {
-  const baseUrl = requiredEnvironment('COMMENTARY_BASE_URL', [
-    'PLAYWRIGHT_API_BASE_URL',
-    'PLAYWRIGHT_BASE_URL'
-  ]);
+  const baseUrl = await resolveBaseUrl();
   const configuredToken =
     process.env.COMMENTARY_ID_TOKEN?.trim() ||
     process.env.PLAYWRIGHT_COGNITO_ID_TOKEN?.trim();
@@ -181,12 +206,3 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exitCode = 1;
   });
 }
-import { randomBytes } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
-import {
-  AdminCreateUserCommand,
-  AdminDeleteUserCommand,
-  AdminInitiateAuthCommand,
-  AdminSetUserPasswordCommand,
-  CognitoIdentityProviderClient
-} from '@aws-sdk/client-cognito-identity-provider';
