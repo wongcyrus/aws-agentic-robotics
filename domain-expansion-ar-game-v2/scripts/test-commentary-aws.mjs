@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import {
+  CloudFormationClient,
+  DescribeStacksCommand
+} from '@aws-sdk/client-cloudformation';
 import {
   AdminCreateUserCommand,
   AdminDeleteUserCommand,
@@ -9,9 +11,7 @@ import {
   AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient
 } from '@aws-sdk/client-cognito-identity-provider';
-
 const supportedEngines = new Set(['strands_local', 'agentcore_runtime', 'openclaw']);
-const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 
 const resolveBaseUrl = async () => {
   for (const key of ['COMMENTARY_BASE_URL', 'PLAYWRIGHT_API_BASE_URL', 'PLAYWRIGHT_BASE_URL']) {
@@ -19,21 +19,23 @@ const resolveBaseUrl = async () => {
     if (configured) return configured;
   }
 
-  const outputPath = process.env.COMMENTARY_CDK_OUTPUT?.trim() ||
-    resolve(scriptDirectory, '../../cdk/output-domain-v2.json');
-  let output;
-  try {
-    output = JSON.parse(await readFile(outputPath, 'utf8'));
-  } catch (error) {
-    throw new Error(`Unable to read CDK output ${outputPath}`, { cause: error });
+  const region =
+    process.env.COMMENTARY_AWS_REGION?.trim() ||
+    process.env.AWS_REGION?.trim() ||
+    process.env.AWS_DEFAULT_REGION?.trim() ||
+    'us-east-1';
+  const stackName = process.env.COMMENTARY_STACK_NAME?.trim() || 'domain-expansion-v2';
+  const cloudFormation = new CloudFormationClient({ region, maxAttempts: 3 });
+  const response = await cloudFormation.send(new DescribeStacksCommand({
+    StackName: stackName
+  }));
+  const output = response.Stacks?.[0]?.Outputs?.find(
+    ({ OutputKey }) => OutputKey === 'DomainExpansionV2Url'
+  )?.OutputValue;
+  if (!output) {
+    throw new Error(`DomainExpansionV2Url is missing from CloudFormation stack ${stackName}`);
   }
-  const stackOutput = Object.values(output).find(
-    (value) => value && typeof value === 'object' && typeof value.DomainExpansionV2Url === 'string'
-  );
-  if (!stackOutput) {
-    throw new Error(`DomainExpansionV2Url is missing from CDK output ${outputPath}`);
-  }
-  return stackOutput.DomainExpansionV2Url;
+  return output;
 };
 
 const selectedEngines = () => {

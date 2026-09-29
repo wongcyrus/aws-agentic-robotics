@@ -60,16 +60,18 @@ npm run test:commentary:aws
 The test runs each engine sequentially, requires HTTP 200 and non-empty
 commentary, verifies the reported engine, and prints response latency. It does
 not attach webcam images or request Polly audio. Using the standard AWS SDK
-credential chain, it reads `DomainExpansionV2Url` from
-`../cdk/output-domain-v2.json`, loads Cognito IDs from the deployed
+credential chain, it reads `DomainExpansionV2Url` from the deployed
+`domain-expansion-v2` CloudFormation stack, loads Cognito IDs from the deployed
 `config.json`, creates a temporary verified user, authenticates for an ID token,
-and deletes the user in cleanup. The caller therefore needs Cognito permissions for
+and deletes the user in cleanup. The caller therefore needs
+`cloudformation:DescribeStacks` plus Cognito permissions for
 `AdminCreateUser`, `AdminSetUserPassword`, `AdminInitiateAuth`, and
 `AdminDeleteUser`.
 
 `COMMENTARY_ID_TOKEN` remains available as an override for environments that
-must not create temporary users. `COMMENTARY_BASE_URL` and
-`COMMENTARY_CDK_OUTPUT` can override the deployed URL or CDK output file.
+must not create temporary users. `COMMENTARY_BASE_URL`,
+`COMMENTARY_STACK_NAME`, and `COMMENTARY_AWS_REGION` can override deployment
+discovery.
 
 To trigger selected engines or change the client timeout:
 
