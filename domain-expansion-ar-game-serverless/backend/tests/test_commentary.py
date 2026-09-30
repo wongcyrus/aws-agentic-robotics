@@ -206,17 +206,28 @@ def test_generate_agentcore_commentary_rejects_empty_response(monkeypatch):
 def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch):
     calls = []
     client_configs = []
-    client = SimpleNamespace(
+    uploaded = []
+    deleted = []
+    agent_client = SimpleNamespace(
         invoke_agent_runtime=lambda **kwargs: calls.append(kwargs)
         or {"response": b'{"response":"openclaw runtime answer"}'}
+    )
+    s3_client = SimpleNamespace(
+        put_object=lambda **kwargs: uploaded.append(kwargs),
+        delete_object=lambda **kwargs: deleted.append(kwargs),
     )
     monkeypatch.setattr(
         commentary.boto3,
         "client",
-        lambda *args, **kwargs: client_configs.append(kwargs["config"]) or client,
+        lambda service, **kwargs: (
+            client_configs.append(kwargs["config"]) or agent_client
+            if service == "bedrock-agentcore"
+            else s3_client
+        ),
     )
     monkeypatch.setenv("OPENCLAW_RUNTIME_ARN", "arn:openclaw-runtime")
     monkeypatch.setenv("OPENCLAW_SESSION_ID", "stable-session")
+    monkeypatch.setattr(commentary, "OPENCLAW_USER_FILES_BUCKET", "openclaw-files")
 
     result = commentary.generate_ai_commentary(
         "openclaw",
@@ -224,6 +235,7 @@ def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch
         session_id="dynamic",
         image_bytes_p1=b"one",
         image_format_p1="jpg",
+        image_bytes_p2=b"two",
         image_base64_p2="two",
         image_format_p2="png",
     )
@@ -231,14 +243,40 @@ def test_generate_openclaw_runtime_builds_identity_and_image_payload(monkeypatch
     assert result == "openclaw runtime answer"
     payload = json.loads(calls[0]["payload"])
     assert calls[0]["runtimeSessionId"].startswith("dashboard_session_")
-    assert payload["image"] != ""
-    assert payload["image_format"] == "jpeg"
-    assert payload["image_p2"] == "two"
     assert payload["session_id"] == calls[0]["runtimeSessionId"]
     assert payload["agentId"] == "main"
     assert payload["model"] == "openclaw/main"
+    assert payload["message"]["text"] == "fight"
+    assert len(payload["message"]["images"]) == 2
+    assert all(image["s3Key"].startswith("stable-session/_uploads/") for image in payload["message"]["images"])
+    assert all(image["contentType"] == "image/jpeg" for image in payload["message"]["images"])
+    assert "image" not in payload
+    assert "image_p2" not in payload
+    assert "messages" not in payload
+    assert len(uploaded) == 2
+    assert [item["Key"] for item in deleted] == [item["Key"] for item in uploaded]
     assert client_configs[0].read_timeout == commentary.AGENTCORE_READ_TIMEOUT_SECONDS
     assert client_configs[0].connect_timeout == 3
+
+
+def test_openclaw_image_upload_requires_bucket_and_enforces_size(monkeypatch):
+    monkeypatch.setattr(commentary, "OPENCLAW_USER_FILES_BUCKET", "")
+    with pytest.raises(RuntimeError, match="OPENCLAW_USER_FILES_BUCKET"):
+        commentary._upload_openclaw_images("telegram:test", "session", b"one", None)
+
+    monkeypatch.setattr(commentary, "OPENCLAW_USER_FILES_BUCKET", "openclaw-files")
+    monkeypatch.setattr(
+        commentary.boto3,
+        "client",
+        lambda *args, **kwargs: SimpleNamespace(
+            put_object=lambda **kwargs: None,
+            delete_object=lambda **kwargs: None,
+        ),
+    )
+    with pytest.raises(ValueError, match="3.75 MB"):
+        commentary._upload_openclaw_images(
+            "telegram:test", "session", b"x" * 3_750_001, None
+        )
 
 
 def test_generate_openclaw_timeout_does_not_fallback(monkeypatch):

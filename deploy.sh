@@ -96,20 +96,46 @@ aws s3 sync ../humanoid-robot-simulator-serverless/frontend/video s3://"$WEBSITE
 
 DOMAIN_WEBSITE_BUCKET=$(jq -r '.[].DomainExpansionWebsiteBucket' output.json)
 aws s3 sync ../domain-expansion-ar-game/public/static/video s3://"$DOMAIN_WEBSITE_BUCKET"/static/video
-DOMAIN_DISTRIBUTION_ID=$(aws cloudformation list-stack-resources \
-    --stack-name aws-agentic-robotics \
-    --query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution' && contains(LogicalResourceId, 'DomainExpansionServerlessConstructGameDistribution')].PhysicalResourceId | [0]" \
-    --output text)
-if [[ -n "$DOMAIN_DISTRIBUTION_ID" && "$DOMAIN_DISTRIBUTION_ID" != "None" ]]; then
-    INVALIDATION_ID=$(aws cloudfront create-invalidation \
-        --distribution-id "$DOMAIN_DISTRIBUTION_ID" \
-        --paths "/static/video/*" \
-        --query Invalidation.Id \
-        --output text)
-    aws cloudfront wait invalidation-completed \
-        --distribution-id "$DOMAIN_DISTRIBUTION_ID" \
-        --id "$INVALIDATION_ID"
-fi
+
+invalidate_domain_videos() {
+    local attempt distribution_id invalidation_id error_output
+    local max_attempts=5
+
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        distribution_id=$(aws cloudformation list-stack-resources \
+            --stack-name aws-agentic-robotics \
+            --query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution' && contains(LogicalResourceId, 'DomainExpansionServerlessConstructGameDistribution')].PhysicalResourceId | [0]" \
+            --output text)
+
+        if [[ -z "$distribution_id" || "$distribution_id" == "None" ]]; then
+            error_output="CloudFormation did not return the Domain Expansion distribution"
+        elif ! invalidation_id=$(aws cloudfront create-invalidation \
+            --distribution-id "$distribution_id" \
+            --paths "/static/video/*" \
+            --query Invalidation.Id \
+            --output text 2>&1); then
+            error_output="$invalidation_id"
+        elif ! error_output=$(aws cloudfront wait invalidation-completed \
+            --distribution-id "$distribution_id" \
+            --id "$invalidation_id" 2>&1); then
+            :
+        else
+            echo "✅ Domain Expansion video cache invalidated on ${distribution_id}."
+            return 0
+        fi
+
+        if ((attempt == max_attempts)); then
+            echo "❌ Failed to invalidate Domain Expansion videos after ${max_attempts} attempts." >&2
+            echo "$error_output" >&2
+            return 1
+        fi
+
+        echo "⚠️ CloudFront distribution was not ready; rediscovering it (attempt $((attempt + 1))/${max_attempts})..."
+        sleep 10
+    done
+}
+
+invalidate_domain_videos
 
 post_deploy_args=(output.json --timeout "$CHECK_TIMEOUT")
 if [[ "$CHECK_HEALTH" == true ]]; then

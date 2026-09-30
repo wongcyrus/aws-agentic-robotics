@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import uuid
 
 import boto3
 from botocore.config import Config
@@ -23,6 +24,7 @@ COMMENTARY_MAX_TOKENS = int(
 )
 AGENTCORE_RUNTIME_ARN = os.environ.get("AGENTCORE_RUNTIME_ARN", "")
 OPENCLAW_RUNTIME_ARN = os.environ.get("OPENCLAW_RUNTIME_ARN", "")
+OPENCLAW_USER_FILES_BUCKET = os.environ.get("OPENCLAW_USER_FILES_BUCKET", "")
 AGENTCORE_READ_TIMEOUT_SECONDS = int(
     os.environ.get("AGENTCORE_READ_TIMEOUT_SECONDS", "50")
 )
@@ -66,6 +68,65 @@ def _build_openclaw_content_block(
             }
         )
     return content
+
+
+def _upload_openclaw_images(
+    actor_id: str,
+    session_id: str,
+    image_bytes_p1: bytes | None,
+    image_bytes_p2: bytes | None,
+) -> tuple[dict | str, list[str]]:
+    images = [
+        ("player1", image_bytes_p1),
+        ("player2", image_bytes_p2),
+    ]
+    available = [(role, data) for role, data in images if data]
+    if not available:
+        return "", []
+    if not OPENCLAW_USER_FILES_BUCKET:
+        raise RuntimeError("OPENCLAW_USER_FILES_BUCKET is required for OpenClaw images")
+
+    namespace = actor_id.replace(":", "_")
+    session_token = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:48]
+    s3_client = boto3.client("s3", region_name=BEDROCK_REGION)
+    uploaded_keys = []
+    image_refs = []
+    try:
+        for role, data in available:
+            if len(data) > 3_750_000:
+                raise ValueError(f"{role} image exceeds the OpenClaw 3.75 MB limit")
+            key = (
+                f"{namespace}/_uploads/domain-expansion-{session_token}-"
+                f"{role}-{uuid.uuid4().hex[:8]}.jpeg"
+            )
+            s3_client.put_object(
+                Bucket=OPENCLAW_USER_FILES_BUCKET,
+                Key=key,
+                Body=data,
+                ContentType="image/jpeg",
+            )
+            uploaded_keys.append(key)
+            image_refs.append({"s3Key": key, "contentType": "image/jpeg"})
+    except Exception:
+        for key in uploaded_keys:
+            try:
+                s3_client.delete_object(Bucket=OPENCLAW_USER_FILES_BUCKET, Key=key)
+            except Exception:
+                logger.exception("Failed to clean up partial OpenClaw image upload")
+        raise
+
+    return {"images": image_refs}, uploaded_keys
+
+
+def _delete_openclaw_images(keys: list[str]) -> None:
+    if not keys or not OPENCLAW_USER_FILES_BUCKET:
+        return
+    s3_client = boto3.client("s3", region_name=BEDROCK_REGION)
+    for key in keys:
+        try:
+            s3_client.delete_object(Bucket=OPENCLAW_USER_FILES_BUCKET, Key=key)
+        except Exception:
+            logger.exception("Failed to delete OpenClaw image %s", key)
 
 
 def _extract_agentcore_commentary(payload):
@@ -334,19 +395,6 @@ def generate_ai_commentary(
         import base64
         image_base64_p2 = base64.b64encode(image_bytes_p2).decode("utf-8")
 
-    # Embed XML tags in content_block for agent container to bypass OpenClaw proxy stripping/flattening
-    is_openclaw_for_tags = agent_engine == "openclaw"
-
-    if is_openclaw_for_tags:
-        tags = []
-        if image_base64_p1:
-            tags.append(f"<p1_webcam_base64_jpeg>{image_base64_p1}</p1_webcam_base64_jpeg>")
-        if image_base64_p2:
-            tags.append(f"<p2_webcam_base64_jpeg>{image_base64_p2}</p2_webcam_base64_jpeg>")
-        if tags:
-            content_block = f"{content_block}\n" + "\n".join(tags)
-            logger.info("Embedded base64 snapshots in content_block XML tags for OpenClaw")
-
     commentary_text = ""
     if agent_engine == "strands_local":
         try:
@@ -466,36 +514,31 @@ def generate_ai_commentary(
 
 
             if is_openclaw:
-                openclaw_content = _build_openclaw_content_block(
-                    content_block,
-                    image_base64_p1,
-                    image_format_p1,
-                    image_base64_p2,
-                    image_format_p2,
+                openclaw_message, openclaw_image_keys = _upload_openclaw_images(
+                    actor_id,
+                    session_id,
+                    image_bytes_p1,
+                    image_bytes_p2,
                 )
+                if isinstance(openclaw_message, dict):
+                    openclaw_message["text"] = content_block
+                else:
+                    openclaw_message = content_block
 
-                # OpenClaw expects its custom payload schema (action: chat)
                 payload_dict = {
                     "action": "chat",
                     "userId": user_id,
                     "actorId": actor_id,
                     "channel": "telegram",
-                    "message": openclaw_content,
-                    # Compatibility payload for OpenAI-style runtimes proxied behind AgentCore.
-                    "messages": [{"role": "user", "content": openclaw_content}],
+                    "message": openclaw_message,
                     "model": f"openclaw/{OPENCLAW_AGENT_ID}",
                     "user": user_id,
                     "agentId": OPENCLAW_AGENT_ID,
                     "prompt": content_block,
                     "session_id": compliant_session_id,
                 }
-                if image_base64_p1:
-                    payload_dict["image"] = image_base64_p1
-                    payload_dict["image_format"] = image_format_p1
-                if image_base64_p2:
-                    payload_dict["image_p2"] = image_base64_p2
-                    payload_dict["image_format_p2"] = image_format_p2
             else:
+                openclaw_image_keys = []
                 payload_dict = {
                     "prompt": content_block,
                     "session_id": compliant_session_id,
@@ -507,27 +550,30 @@ def generate_ai_commentary(
                     payload_dict["image_p2"] = image_base64_p2
                     payload_dict["image_format_p2"] = image_format_p2
 
-            response = agent_client.invoke_agent_runtime(
-                agentRuntimeArn=runtime_arn,
-                runtimeSessionId=compliant_session_id,
-                payload=json.dumps(payload_dict).encode("utf-8"),
-            )
+            try:
+                response = agent_client.invoke_agent_runtime(
+                    agentRuntimeArn=runtime_arn,
+                    runtimeSessionId=compliant_session_id,
+                    payload=json.dumps(payload_dict).encode("utf-8"),
+                )
 
-            body = response.get("response")
-            if hasattr(body, "read"):
-                payload_bytes = body.read()
-            elif isinstance(body, bytes):
-                payload_bytes = body
-            elif isinstance(body, str):
-                payload_bytes = body.encode("utf-8")
-            else:
-                chunks = []
-                for chunk in body or []:
-                    if isinstance(chunk, bytes):
-                        chunks.append(chunk)
-                    elif isinstance(chunk, str):
-                        chunks.append(chunk.encode("utf-8"))
-                payload_bytes = b"".join(chunks)
+                body = response.get("response")
+                if hasattr(body, "read"):
+                    payload_bytes = body.read()
+                elif isinstance(body, bytes):
+                    payload_bytes = body
+                elif isinstance(body, str):
+                    payload_bytes = body.encode("utf-8")
+                else:
+                    chunks = []
+                    for chunk in body or []:
+                        if isinstance(chunk, bytes):
+                            chunks.append(chunk)
+                        elif isinstance(chunk, str):
+                            chunks.append(chunk.encode("utf-8"))
+                    payload_bytes = b"".join(chunks)
+            finally:
+                _delete_openclaw_images(openclaw_image_keys)
 
             payload_str = payload_bytes.decode("utf-8")
 

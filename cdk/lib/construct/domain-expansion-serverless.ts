@@ -53,6 +53,12 @@ export class DomainExpansionServerlessConstruct extends Construct {
       this,
       "/openclaw/agentcore/runtime-arn-dev"
     );
+    const openClawUserFilesBucketName = `openclaw-user-files-${Stack.of(this).account}-${Stack.of(this).region}-dev`;
+    const openClawUserFilesBucket = s3.Bucket.fromBucketName(
+      this,
+      "OpenClawUserFilesBucket",
+      openClawUserFilesBucketName
+    );
     const observability = createAgentCoreRuntimeObservability(
       this,
       "DomainExpansionObservability",
@@ -193,6 +199,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
         OPENCLAW_RUNTIME_ARN: openClawRuntimeArn,
         OPENCLAW_SESSION_ID: "telegram:default",
         OPENCLAW_AGENT_ID: "main",
+        OPENCLAW_USER_FILES_BUCKET: openClawUserFilesBucketName,
         BEDROCK_MODEL_ID: KIMI_MODEL_ID,
         COMMENTARY_MAX_TOKENS: "1600",
         AGENTCORE_READ_TIMEOUT_SECONDS: "50",
@@ -213,6 +220,25 @@ export class DomainExpansionServerlessConstruct extends Construct {
     connectionsTable.grantReadWriteData(lambdaFunction);
     sessionsTable.grantReadWriteData(lambdaFunction);
     photosBucket.grantReadWrite(lambdaFunction);
+    openClawUserFilesBucket.grantReadWrite(
+      lambdaFunction,
+      "telegram_default/_uploads/*"
+    );
+    lambdaFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["kms:Encrypt", "kms:GenerateDataKey"],
+        resources: ["*"],
+        conditions: {
+          StringEquals: {
+            "kms:ViaService": `s3.${Stack.of(this).region}.amazonaws.com`,
+          },
+          StringLike: {
+            "kms:EncryptionContext:aws:s3:arn":
+              `${openClawUserFilesBucket.bucketArn}/telegram_default/_uploads/*`,
+          },
+        },
+      })
+    );
     lambdaFunction.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [

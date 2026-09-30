@@ -288,10 +288,60 @@ describe("AgentCore-backed constructs", () => {
         Variables: Match.objectLike({
           OPENCLAW_SESSION_ID: "telegram:default",
           OPENCLAW_AGENT_ID: "main",
+          OPENCLAW_USER_FILES_BUCKET:
+            "openclaw-user-files-111122223333-us-east-1-dev",
           ROBOT_API_ENDPOINT: "https://simulator.example.test",
           McpServerGatewayUrl: "https://gateway.example.test",
           DEFAULT_SESSION_KEY: "mcpserver",
         }),
+      },
+    });
+    template.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith([
+              "s3:GetObject*",
+              "s3:DeleteObject*",
+              "s3:PutObject",
+            ]),
+            Effect: "Allow",
+            Resource: Match.arrayWith([
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    { Ref: "AWS::Partition" },
+                    ":s3:::openclaw-user-files-111122223333-us-east-1-dev/telegram_default/_uploads/*",
+                  ],
+                ],
+              },
+            ]),
+          }),
+          {
+            Action: ["kms:Encrypt", "kms:GenerateDataKey"],
+            Condition: {
+              StringEquals: {
+                "kms:ViaService": "s3.us-east-1.amazonaws.com",
+              },
+              StringLike: {
+                "kms:EncryptionContext:aws:s3:arn": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      { Ref: "AWS::Partition" },
+                      ":s3:::openclaw-user-files-111122223333-us-east-1-dev/telegram_default/_uploads/*",
+                    ],
+                  ],
+                },
+              },
+            },
+            Effect: "Allow",
+            Resource: "*",
+          },
+        ]),
       },
     });
     template.hasResourceProperties("AWS::DynamoDB::Table", {
