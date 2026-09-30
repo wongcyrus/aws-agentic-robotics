@@ -96,6 +96,20 @@ aws s3 sync ../humanoid-robot-simulator-serverless/frontend/video s3://"$WEBSITE
 
 DOMAIN_WEBSITE_BUCKET=$(jq -r '.[].DomainExpansionWebsiteBucket' output.json)
 aws s3 sync ../domain-expansion-ar-game/public/static/video s3://"$DOMAIN_WEBSITE_BUCKET"/static/video
+DOMAIN_DISTRIBUTION_ID=$(aws cloudformation list-stack-resources \
+    --stack-name aws-agentic-robotics \
+    --query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution' && contains(LogicalResourceId, 'DomainExpansionServerlessConstructGameDistribution')].PhysicalResourceId | [0]" \
+    --output text)
+if [[ -n "$DOMAIN_DISTRIBUTION_ID" && "$DOMAIN_DISTRIBUTION_ID" != "None" ]]; then
+    INVALIDATION_ID=$(aws cloudfront create-invalidation \
+        --distribution-id "$DOMAIN_DISTRIBUTION_ID" \
+        --paths "/static/video/*" \
+        --query Invalidation.Id \
+        --output text)
+    aws cloudfront wait invalidation-completed \
+        --distribution-id "$DOMAIN_DISTRIBUTION_ID" \
+        --id "$INVALIDATION_ID"
+fi
 
 post_deploy_args=(output.json --timeout "$CHECK_TIMEOUT")
 if [[ "$CHECK_HEALTH" == true ]]; then
