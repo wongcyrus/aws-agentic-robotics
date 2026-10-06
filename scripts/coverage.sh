@@ -48,7 +48,8 @@ run_coverage \
 
 run_coverage \
     speech \
-    speech_control_agentcore/backend
+    speech_control_agentcore/backend \
+    --with 'strands-agents[bidi]==1.58.0'
 
 python3 - "${MIN_COVERAGE}" "${REPORT_DIR}" <<'PY'
 import json

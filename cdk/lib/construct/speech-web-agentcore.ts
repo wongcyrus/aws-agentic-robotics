@@ -114,7 +114,7 @@ export class SpeechControlAgentcoreConstruct extends Construct {
     // 3. Grant full access to DynamoDB tables
     props.database.robotTable.grantFullAccess(runtime.role);
 
-    // 4. Grant access to invoke Bedrock models (Nova 2 Sonic)
+    // 4. Grant access to invoke Bedrock models (Nova 2.5 Sonic)
     runtime.role.addToPrincipalPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -123,8 +123,7 @@ export class SpeechControlAgentcoreConstruct extends Construct {
           "bedrock:InvokeModelWithResponseStream",
         ],
         resources: [
-          "arn:aws:bedrock:*::foundation-model/amazon.nova-sonic-v1:0",
-          "arn:aws:bedrock:*::foundation-model/amazon.nova-2-sonic-v1:0",
+          "arn:aws:bedrock:*::foundation-model/amazon.nova-2-5-sonic",
         ],
       })
     );

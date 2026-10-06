@@ -1,8 +1,8 @@
 # Speech Control AgentCore Cockpit
 
-A state-of-the-art, serverless voice-to-speech robotics fleet controller powered by **Amazon Bedrock AgentCore Runtime** and **Amazon Nova 2 Sonic**. 
+A state-of-the-art, serverless voice-to-speech robotics fleet controller powered by **Amazon Bedrock AgentCore Runtime** and **Amazon Nova 2.5 Sonic**.
 
-This component enables natural, real-time bidirectional voice conversations to command physical and simulated hardware fleets (including humanoid robots, quadcopter drones, and digital humans).
+This component enables natural, real-time bidirectional voice conversations to command physical and simulated humanoid robots and digital humans.
 
 ---
 
@@ -19,7 +19,7 @@ graph TD
     CF -->|Serves Web Assets| S3[S3 Static Website]
     User -->|5. Presign Handshake SigV4| Runtime[Bedrock AgentCore Runtime]
     Runtime -->|6. Connects Bidirectional WebSocket| Agent[FastAPI Container Agent]
-    Agent -->|7. Model Inferences| Sonic[Amazon Nova Sonic 16kHz]
+    Agent -->|7. Model Inferences| Sonic[Amazon Nova 2.5 Sonic 16kHz]
     Agent -->|8. SigV4 MCP tools/list + tools/call| Gateway[Robot-only AgentCore Gateway]
     Gateway -->|9. Lambda Target Invoke| RobotLambda[Robot Tool Lambda]
     RobotLambda -->|10. IoT Publish| IoT[AWS IoT Core]
@@ -36,12 +36,14 @@ graph TD
 
 This cockpit features several advanced, state-of-the-art interactive systems:
 
-* **16kHz Calibrated Sonic Voice**: Custom audio players are calibrated to match the native `16000 Hz` sampling rate of the Amazon Nova Sonic model, restoring natural-sounding, perfectly-paced speech responses.
+* **Nova 2.5 Sonic with GA Strands Bidi**: The backend uses `amazon.nova-2-5-sonic` through the supported `strands.bidi` API, including automatic connection renewal before Nova Sonic's eight-minute connection limit.
+* **16kHz Calibrated Sonic Voice**: Custom audio players are calibrated to use `16000 Hz` input and output with Amazon Nova 2.5 Sonic, preserving the existing browser audio pipeline.
+* **GA Barge-In Handling**: The custom browser output bridge handles `BidiBargeInEvent` by clearing queued AudioWorklet playback immediately, matching the behavior provided by Strands `AudioIO`.
 * **Fluid Zero-Refresh Reconnect**: If a voice stream times out or disconnects, the UI automatically deactivates the microphone and returns to a resumable state. **Just click "Start Streaming" to resume without reloading the page.**
 * **Cost-Saving Session Guards**: The frontend uses a 30-second `setInterval` polling loop to continuously verify the expiration (`exp`) claim on the user's Cognito JWT identity token. Upon expiration, it instantly triggers a hard local logout sequence, effectively dropping the SigV4 WebSocket and preventing lingering, idle connections from consuming expensive AWS Bedrock AgentCore runtime compute costs.
-* **Grouped Device Selector**: Dropdowns utilize interactive HTML categories (`Robots`, `Drones`, `Digital Humans`) to let you target specific online devices if certain systems are powered off.
-* **Smart "All" Mapping**: Selecting or saying "All" automatically translates to an explicit array covering the current active targets (`robot_1` through `robot_6`, `drone_1` to `drone_2`, and `xiaoice_1`), which allows the simulator to sync them consistently.
-* **Real-time System Prompt Adaptation**: The FastAPI backend dynamically updates the AI model's `system_prompt` on selection change events. If you select only drones, the AI persona shifts to focus strictly on flight profiles; if you select only robots, it focuses on robot motion and telemetry.
+* **Grouped Device Selector**: Dropdowns let you target active humanoid robots and the digital human.
+* **Smart "All" Mapping**: Selecting or saying "All" automatically translates to the current targets (`robot_1` through `robot_6` and `xiaoice_1`).
+* **Real-time System Prompt Adaptation**: The FastAPI backend dynamically updates the AI model's `system_prompt` for the selected robots or digital human.
 * **Dual Live2D Lip Sync**: The left and right avatars now drive mouth movement from real playback and microphone RMS data with Cubism 2-safe parameter handling.
 
 ---
@@ -87,6 +89,8 @@ Optional IAM tuning:
 
 - `MCP_AWS_SERVICE` (default: `bedrock-agentcore`)
 - `AWS_DEFAULT_REGION` (default: `us-east-1`)
+- `AWS_BEDROCK_REGION` (default: `us-east-1`; Nova 2.5 Sonic is available in `us-east-1`, `us-west-2`, `eu-north-1`, and `ap-northeast-1`)
+- `NOVA_SONIC_MODEL_ID` (default: `amazon.nova-2-5-sonic`)
 
 At runtime, the speech backend uses the native Strands `MCPClient` with `streamable_http_client` against the AgentCore Gateway. In this repo, the gateway itself is created with an **AWS_IAM** inbound authorizer, so the MCP HTTP transport must be signed with SigV4 for the `bedrock-agentcore` service. The speech runtime is granted gateway invoke permissions during CDK deployment.
 

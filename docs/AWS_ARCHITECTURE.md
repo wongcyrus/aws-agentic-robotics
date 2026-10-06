@@ -50,7 +50,7 @@ graph TB
     end
 
     subgraph AIModelLayer ["AI Model Layer"]
-        NovaSonic["Amazon Nova 2 Sonic"]
+        NovaSonic["Amazon Nova 2.5 Sonic"]
         NovaText["Amazon Nova 2 Lite / Nova Pro"]
         Kimi["Moonshot Kimi on Bedrock"]
         GameAgent["Domain Commentator AgentCore Runtime"]
@@ -195,7 +195,7 @@ This means the system already separates:
 
 | Surface | Model role | Current implementation |
 | --- | --- | --- |
-| Voice cockpit | Real-time speech-to-speech streaming | `amazon.nova-2-sonic-v1:0` |
+| Voice cockpit | Real-time speech-to-speech streaming | `amazon.nova-2-5-sonic` |
 | Text control | Text reasoning and tool orchestration | `us.amazon.nova-2-lite-v1:0` |
 | AR image fusion | Image generation | `amazon.nova-canvas-v1:0` |
 

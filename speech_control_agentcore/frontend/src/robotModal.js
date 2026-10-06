@@ -16,13 +16,10 @@ export function setupRobotModal() {
         <div class="category-section" style="margin-bottom: 16px;">
           <div class="category-header" style="font-weight: bold; color: #646cff; border-bottom: 1px solid #333; margin-bottom: 10px; padding-bottom: 4px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px;">Shortcuts</div>
           <label style="display: flex; align-items: center; margin: 8px 0; cursor: pointer; font-size: 0.95rem; user-select: none;">
-            <input type="checkbox" value="all" class="robot-checkbox" id="cb-all" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;" /> <strong>All (Robots + Drones + Digital Human)</strong>
+            <input type="checkbox" value="all" class="robot-checkbox" id="cb-all" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;" /> <strong>All (Robots + Digital Human)</strong>
           </label>
           <label style="display: flex; align-items: center; margin: 8px 0; cursor: pointer; font-size: 0.95rem; user-select: none;">
             <input type="checkbox" value="all_robots" class="robot-checkbox" id="cb-all-robots" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;" checked /> All Robots (1 - 6)
-          </label>
-          <label style="display: flex; align-items: center; margin: 8px 0; cursor: pointer; font-size: 0.95rem; user-select: none;">
-            <input type="checkbox" value="all_drones" class="robot-checkbox" id="cb-all-drones" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;" /> All Drones (1 - 2)
           </label>
         </div>
 
@@ -36,15 +33,6 @@ export function setupRobotModal() {
             <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem; user-select: none;"><input type="checkbox" value="robot_4" class="robot-checkbox device-cb group-robots" style="margin-right: 8px; width: 14px; height: 14px;" checked /> Robot 4</label>
             <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem; user-select: none;"><input type="checkbox" value="robot_5" class="robot-checkbox device-cb group-robots" style="margin-right: 8px; width: 14px; height: 14px;" checked /> Robot 5</label>
             <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem; user-select: none;"><input type="checkbox" value="robot_6" class="robot-checkbox device-cb group-robots" style="margin-right: 8px; width: 14px; height: 14px;" checked /> Robot 6</label>
-          </div>
-        </div>
-
-        <!-- drones category -->
-        <div class="category-section" style="margin-bottom: 16px;">
-          <div class="category-header" style="font-weight: bold; color: #646cff; border-bottom: 1px solid #333; margin-bottom: 10px; padding-bottom: 4px; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px;">Drones</div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem; user-select: none;"><input type="checkbox" value="drone_1" class="robot-checkbox device-cb group-drones" style="margin-right: 8px; width: 14px; height: 14px;" /> Drone 1</label>
-            <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem; user-select: none;"><input type="checkbox" value="drone_2" class="robot-checkbox device-cb group-drones" style="margin-right: 8px; width: 14px; height: 14px;" /> Drone 2</label>
           </div>
         </div>
 
@@ -77,17 +65,14 @@ export function setupRobotModal() {
   // Setup reactive syncing for shortcuts and child checkboxes
   const cbAll = document.getElementById('cb-all');
   const cbAllRobots = document.getElementById('cb-all-robots');
-  const cbAllDrones = document.getElementById('cb-all-drones');
 
   const robotCbs = document.querySelectorAll('.group-robots');
-  const droneCbs = document.querySelectorAll('.group-drones');
   const deviceCbs = document.querySelectorAll('.device-cb');
 
-  // Shortcut 1: All (Robots + Drones + Digital Human)
+  // Shortcut 1: All (Robots + Digital Human)
   cbAll.addEventListener('change', () => {
     const isChecked = cbAll.checked;
     cbAllRobots.checked = isChecked;
-    cbAllDrones.checked = isChecked;
     deviceCbs.forEach(cb => cb.checked = isChecked);
   });
 
@@ -98,26 +83,11 @@ export function setupRobotModal() {
     updateAllShortcutState();
   });
 
-  // Shortcut 3: All Drones (1 - 2)
-  cbAllDrones.addEventListener('change', () => {
-    const isChecked = cbAllDrones.checked;
-    droneCbs.forEach(cb => cb.checked = isChecked);
-    updateAllShortcutState();
-  });
-
   // Child changes: Sync back to parent shortcuts
   robotCbs.forEach(cb => {
     cb.addEventListener('change', () => {
       const allChecked = Array.from(robotCbs).every(c => c.checked);
       cbAllRobots.checked = allChecked;
-      updateAllShortcutState();
-    });
-  });
-
-  droneCbs.forEach(cb => {
-    cb.addEventListener('change', () => {
-      const allChecked = Array.from(droneCbs).every(c => c.checked);
-      cbAllDrones.checked = allChecked;
       updateAllShortcutState();
     });
   });
@@ -135,7 +105,6 @@ export function setupRobotModal() {
     const checkedValues = [];
     if (cbAll.checked) checkedValues.push('all');
     if (cbAllRobots.checked) checkedValues.push('all_robots');
-    if (cbAllDrones.checked) checkedValues.push('all_drones');
 
     deviceCbs.forEach(cb => {
       if (cb.checked) checkedValues.push(cb.value);

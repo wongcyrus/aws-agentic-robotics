@@ -423,7 +423,6 @@ function getSelectedRobots() {
     if (selected.includes('all')) {
         return Array.from(new Set([
             "robot_1", "robot_2", "robot_3", "robot_4", "robot_5", "robot_6",
-            "drone_1", "drone_2",
             "xiaoice_1"
         ]));
     }
@@ -433,12 +432,8 @@ function getSelectedRobots() {
     if (selected.includes('all_robots')) {
         for (let i = 1; i <= 6; i++) result.add(`robot_${i}`);
     }
-    if (selected.includes('all_drones')) {
-        for (let i = 1; i <= 2; i++) result.add(`drone_${i}`);
-    }
-
     selected.forEach(val => {
-        if (!['all', 'all_robots', 'all_drones'].includes(val)) {
+        if (!['all', 'all_robots'].includes(val)) {
             result.add(val);
         }
     });

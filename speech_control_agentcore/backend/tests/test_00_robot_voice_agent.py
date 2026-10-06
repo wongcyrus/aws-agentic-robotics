@@ -66,15 +66,14 @@ def install_dependency_stubs():
     sys.modules["fastapi.staticfiles"] = staticfiles
 
     strands = types.ModuleType("strands")
-    experimental = types.ModuleType("strands.experimental")
-    bidi = types.ModuleType("strands.experimental.bidi")
-    models = types.ModuleType("strands.experimental.bidi.models")
-    bidi_types = types.ModuleType("strands.experimental.bidi.types")
-    events = types.ModuleType("strands.experimental.bidi.types.events")
+    bidi = types.ModuleType("strands.bidi")
+    models = types.ModuleType("strands.bidi.models")
+    bidi_types = types.ModuleType("strands.bidi.types")
 
-    class FakeInputEvent:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
+    class FakeAudioDelta:
+        def __init__(self, format, source):
+            self.format = format
+            self.source = source
 
     class FakeModel:
         def __init__(self, **kwargs):
@@ -88,16 +87,12 @@ def install_dependency_stubs():
             await inputs[0]()
 
     bidi.BidiAgent = FakeAgent
-    models.BidiNovaSonicModel = FakeModel
-    events.BidiAudioInputEvent = FakeInputEvent
-    events.BidiTextInputEvent = FakeInputEvent
-    events.BidiImageInputEvent = FakeInputEvent
+    models.BedrockNovaSonicModel = FakeModel
+    bidi_types.AudioDelta = FakeAudioDelta
     sys.modules["strands"] = strands
-    sys.modules["strands.experimental"] = experimental
-    sys.modules["strands.experimental.bidi"] = bidi
-    sys.modules["strands.experimental.bidi.models"] = models
-    sys.modules["strands.experimental.bidi.types"] = bidi_types
-    sys.modules["strands.experimental.bidi.types.events"] = events
+    sys.modules["strands.bidi"] = bidi
+    sys.modules["strands.bidi.models"] = models
+    sys.modules["strands.bidi.types"] = bidi_types
 
     tools = types.ModuleType("tools")
     tools.cleanup_tools = MagicMock()
@@ -158,26 +153,32 @@ class EndpointAndPromptTests(unittest.TestCase):
         self.assertTrue(filter_instance.filter(no_args_record))
 
     def test_load_system_prompt_file_and_fallback(self):
-        self.assertIn("robot", robot_voice_agent.load_system_prompt().lower())
+        system_prompt = robot_voice_agent.load_system_prompt().lower()
+        self.assertIn("robot", system_prompt)
+        self.assertNotIn("drone", system_prompt)
 
         with patch.object(robot_voice_agent.Path, "exists", return_value=False):
             fallback = robot_voice_agent.load_system_prompt()
         self.assertIn("robot command assistant", fallback)
 
     def test_generate_dynamic_prompt_for_all_and_restricted_devices(self):
-        base = "Robot commands\nDrone commands\nGeneral safety"
+        base = "Robot commands\nDigital human commands\nGeneral safety"
         with patch.object(robot_voice_agent, "load_system_prompt", return_value=base):
             all_prompt = robot_voice_agent.generate_dynamic_prompt(["all"])
             robot_prompt = robot_voice_agent.generate_dynamic_prompt(["robot_1"])
-            drone_prompt = robot_voice_agent.generate_dynamic_prompt(["drone_1"])
+            digital_human_prompt = robot_voice_agent.generate_dynamic_prompt(
+                ["xiaoice_1"]
+            )
+            legacy_drone_prompt = robot_voice_agent.generate_dynamic_prompt(["drone_1"])
             mixed_prompt = robot_voice_agent.generate_dynamic_prompt(
-                ["robot_1", "drone_1", "xiaoice_1"]
+                ["robot_1", "xiaoice_1"]
             )
 
         self.assertIn("entire integrated fleet", all_prompt)
-        self.assertNotIn("Drone commands", robot_prompt)
+        self.assertNotIn("drone", all_prompt.lower())
         self.assertIn("ONLY: robot_1", robot_prompt)
-        self.assertIn("ONLY drones are active", drone_prompt)
+        self.assertIn("ONLY the digital human is active", digital_human_prompt)
+        self.assertNotIn("drone", legacy_drone_prompt.lower())
         self.assertIn("Digital Human", mixed_prompt)
 
 
@@ -274,7 +275,7 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "robot", "robots": "robot_2"},
                 {"type": "audioStart"},
                 {"type": "stopAudio"},
-                {"type": "bidi_audio_input", "audio": "encoded"},
+                {"type": "bidi_audio_input", "audio": "YXVkaW8="},
             ],
             query_params={"voice_id": "matthew", "robots": "robot_1"},
         )
@@ -290,20 +291,16 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
                 output = outputs[0]
 
                 transcript = type(
-                    "BidiTranscriptStreamEvent",
+                    "BidiTranscriptDeltaEvent",
                     (),
-                    {"text": "hello", "role": "assistant"},
-                )()
-                transcript_delta = type(
-                    "BidiTranscriptStreamEvent",
-                    (),
-                    {"text": "", "delta": SimpleNamespace(text="delta")},
+                    {"delta": "hello", "role": "assistant"},
                 )()
                 audio = type(
-                    "BidiAudioStreamEvent", (), {"audio": "audio-base64"}
+                    "BidiAudioDeltaEvent", (), {"audio": "audio-base64"}
                 )()
                 response_start = type("BidiResponseStartEvent", (), {})()
-                response_end = type("ResponseCompleteEvent", (), {})()
+                barge_in = type("BidiBargeInEvent", (), {})()
+                response_end = type("BidiResponseStopEvent", (), {})()
                 to_dict_event = type(
                     "OtherEvent",
                     (),
@@ -314,9 +311,9 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
 
                 for event in [
                     transcript,
-                    transcript_delta,
                     audio,
                     response_start,
+                    barge_in,
                     response_end,
                     to_dict_event,
                     dict_event,
@@ -331,7 +328,20 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
                 await robot_voice_agent.websocket_endpoint(websocket)
 
         self.assertTrue(websocket.accepted)
-        self.assertEqual(captured["input_event"].audio, "encoded")
+        self.assertEqual(captured["input_event"].source["bytes"], b"audio")
+        self.assertEqual(captured["input_event"].format, "pcm")
+        self.assertEqual(
+            captured["agent"].model.kwargs["model_id"],
+            "amazon.nova-2-5-sonic",
+        )
+        self.assertEqual(captured["agent"].model.kwargs["voice"], "matthew")
+        self.assertEqual(
+            captured["agent"].model.kwargs["audio"],
+            {
+                "input": {"sample_rate": 16000},
+                "output": {"sample_rate": 16000},
+            },
+        )
         self.assertIn(
             {"type": "robot_received", "robots": ["robot_2"]},
             websocket.sent,
@@ -341,6 +351,15 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(
             any("audioOutput" in item.get("event", {}) for item in websocket.sent)
+        )
+        content_end_events = [
+            item["event"]["contentEnd"]
+            for item in websocket.sent
+            if "contentEnd" in item.get("event", {})
+        ]
+        self.assertEqual(
+            content_end_events,
+            [{"type": "TEXT", "stopReason": "INTERRUPTED"}],
         )
         self.assertIn({"custom": True}, websocket.sent)
         self.assertIn({"raw": True}, websocket.sent)
@@ -367,4 +386,3 @@ class WebSocketTests(unittest.IsolatedAsyncioTestCase):
             failing_websocket.sent,
         )
         self.assertEqual(failing_websocket.closed["code"], 1011)
-

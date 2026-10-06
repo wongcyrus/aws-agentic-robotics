@@ -15,14 +15,10 @@ import uvicorn
 import boto3
 
 # Strands BidiAgent & Model
-from strands.experimental.bidi import BidiAgent
-from strands.experimental.bidi.models import BidiNovaSonicModel
-from strands.experimental.bidi.types.events import (
-    BidiAudioInputEvent,
-    BidiTextInputEvent,
-    BidiImageInputEvent,
-)
+from strands.bidi import BidiAgent
+from strands.bidi.models import BedrockNovaSonicModel
 
+from bidi_bridge import BidiBrowserBridge, convert_client_event
 from tools import cleanup_tools, get_all_tools, warmup_tools
 
 # Configure Logger
@@ -51,6 +47,9 @@ selected_robots_var = contextvars.ContextVar("selected_robots", default=["all"])
 # Environment variables
 COGNITO_REGION = os.environ.get("CognitoRegion", "us-east-1")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION", "us-east-1")
+NOVA_SONIC_MODEL_ID = os.environ.get(
+    "NOVA_SONIC_MODEL_ID", "amazon.nova-2-5-sonic"
+)
 
 
 def load_system_prompt() -> str:
@@ -64,7 +63,7 @@ def load_system_prompt() -> str:
     return """You are a robot command assistant.
 Your primary role is to execute physical actions by calling the available tools.
 Interpret natural spoken forms like "robot 1" as structured IDs like `robot_1`.
-Map natural action phrases like "stand up", "go forward", and "take off" to the closest matching tool.
+Map natural action phrases like "stand up", "go forward", and "wave" to the closest matching tool.
 Keep spoken replies concise and action-oriented."""
 
 
@@ -72,30 +71,21 @@ def generate_dynamic_prompt(robots: list) -> str:
     """Dynamically adjust prompt based on selected hardware devices."""
     base_prompt = load_system_prompt()
     
-    # Determine if everything is selected (default, empty, all, or lists containing all categories)
-    has_all = "all" in robots or len(robots) >= 11 or not robots
-    
-    # Extract categories
-    robots_list = [r for r in robots if r.startswith("robot_")]
-    drones_list = [r for r in robots if r.startswith("drone_")]
-    xiaoice_list = [r for r in robots if r.startswith("xiaoice_")]
-    
-    # FILTER BASE PROMPT: Completely purge references to unselected hardware categories.
-    # This prevents the AI attention mechanisms from leaking unselected keywords into dialogue.
-    base_lines = base_prompt.splitlines()
-    filtered_lines = []
-    for line in base_lines:
-        line_lower = line.lower()
-        if not drones_list and any(kw in line_lower for kw in ["drone", "drum", "dom,", "drome"]):
-            continue
-        filtered_lines.append(line)
-    base_prompt = "\n".join(filtered_lines)
+    supported_devices = [
+        device
+        for device in robots
+        if device.startswith("robot_") or device.startswith("xiaoice_")
+    ]
+    has_all = "all" in robots or len(supported_devices) >= 7 or not supported_devices
+
+    robots_list = [device for device in supported_devices if device.startswith("robot_")]
+    xiaoice_list = [
+        device for device in supported_devices if device.startswith("xiaoice_")
+    ]
     
     focus_areas = []
     if robots_list:
         focus_areas.append(f"Robots ({', '.join(robots_list)})")
-    if drones_list:
-        focus_areas.append(f"Drones ({', '.join(drones_list)})")
     if xiaoice_list:
         focus_areas.append(f"Digital Human ({', '.join(xiaoice_list)})")
         
@@ -104,23 +94,22 @@ def generate_dynamic_prompt(robots: list) -> str:
     dynamic_instruction = "\n\n=== DYNAMIC HARDWARE SELECTION CONTEXT ===\n"
     if has_all:
         dynamic_instruction += (
-            "You are currently commanding the entire integrated fleet synchronously: all Robots, Drones, and Xiaoice.\n"
+            "You are currently commanding the entire integrated fleet synchronously: all Robots and Xiaoice.\n"
             "You have full access to all command tools. You can coordinate multiple devices together or refer to the collective fleet.\n"
-            'Interpret collective phrases like "all robots", "all drones", "everyone", and "all of them" as commands for the relevant full active group.'
+            'Interpret collective phrases like "all robots", "everyone", and "all of them" as commands for the relevant full active group.'
         )
     else:
         dynamic_instruction += (
-            f"IMPORTANT: The user has selected a restricted subset of active devices. You are currently commanding ONLY: {', '.join(robots)}.\n"
+            f"IMPORTANT: The user has selected a restricted subset of active devices. You are currently commanding ONLY: {', '.join(supported_devices)}.\n"
             f"Active Focus Area(s): {focus_summary}.\n"
             "Your tool executions and spoken replies must be strictly limited to these selected systems.\n"
-            'When the user says "all robots", "all drones", "everyone", or "all of them", interpret that as the full currently selected subset for the relevant category.\n'
+            'When the user says "all robots", "everyone", or "all of them", interpret that as the full currently selected subset for the relevant category.\n'
             "For example:\n"
         )
-        # Shift to positive-only constraints to prevent attention-leakage keywords from seeding the LLM context
-        if drones_list and not robots_list:
-            dynamic_instruction += "- Since ONLY drones are active, focus 100% on aerial maneuvers (takeoff, land, fly) and discuss only flight operations.\n"
-        elif robots_list and not drones_list:
+        if robots_list and not xiaoice_list:
             dynamic_instruction += "- Since ONLY humanoid/wheeled robots are active, focus 100% on robot actions (stand, move, walk, check sensors) and discuss only robot telemetry.\n"
+        elif xiaoice_list and not robots_list:
+            dynamic_instruction += "- Since ONLY the digital human is active, focus on supported speech and presentation interactions.\n"
         else:
             dynamic_instruction += "- Coordinate and execute tools strictly targeting the specific devices that are checked above.\n"
             
@@ -282,17 +271,14 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"Loaded {len(tools)} tools. Initial system prompt compiled for: {robots}")
 
         # 3. Instantiate model targeting official AWS Model ID
-        model = BidiNovaSonicModel(
+        model = BedrockNovaSonicModel(
             region=AWS_BEDROCK_REGION,
-            model_id="amazon.nova-2-sonic-v1:0",
-            provider_config={
-                "audio": {
-                    "input_sample_rate": 16000,
-                    "output_sample_rate": 16000,
-                    "voice": voice_id,
-                }
+            model_id=NOVA_SONIC_MODEL_ID,
+            voice=voice_id,
+            audio={
+                "input": {"sample_rate": 16000},
+                "output": {"sample_rate": 16000},
             },
-            tools=tools,
         )
 
         # 4. Initialize the BidiAgent with the CORRECT, dynamically adjusted, purged system prompt from second zero!
@@ -302,6 +288,7 @@ async def websocket_endpoint(websocket: WebSocket):
             system_prompt=system_prompt,
         )
         logger.info("Strands BidiAgent instantiated successfully. Launching streaming event loop...")
+        browser_bridge = BidiBrowserBridge()
 
         # Converter function to map incoming websocket JSON payloads into Strands Events
         async def receive_and_convert():
@@ -344,12 +331,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Strip 'type' and convert to native Strands input events
                 event_data = {k: v for k, v in data.items() if k != "type"}
 
-                if event_type == "bidi_audio_input":
-                    return BidiAudioInputEvent(**event_data)
-                elif event_type == "bidi_text_input":
-                    return BidiTextInputEvent(**event_data)
-                elif event_type == "bidi_image_input":
-                    return BidiImageInputEvent(**event_data)
+                if event_type in [
+                    "bidi_audio_input",
+                    "bidi_text_input",
+                    "bidi_image_input",
+                ]:
+                    return convert_client_event(event_type, event_data)
                 elif event_type in ["audioStart", "promptStart", "systemPrompt"]:
                     # Handle state signals
                     logger.info(f"Signal received: {event_type}")
@@ -369,78 +356,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     "Tool-related outbound event payload: %s",
                     getattr(event, "__dict__", str(event)),
                 )
-            
-            # 1. Handle Transcripts
-            if event_type == "BidiTranscriptStreamEvent":
-                text = getattr(event, "text", "")
-                if not text and hasattr(event, "delta"):
-                    delta = event.delta
-                    if hasattr(delta, "text"):
-                        text = delta.text
-                    elif isinstance(delta, str):
-                        text = delta
-                
-                payload = {
-                    "event": {
-                        "textOutput": {
-                            "content": text,
-                            "role": getattr(event, "role", "assistant").upper()
-                        }
-                    }
-                }
-                logger.info(f"Sending textOutput chunk: '{text[:30]}...'")
-                await websocket.send_json(payload)
-                
-            # 2. Handle Audio Outputs
-            elif event_type == "BidiAudioStreamEvent":
-                audio_base64 = getattr(event, "audio", "")
-                payload = {
-                    "event": {
-                        "audioOutput": {
-                            "content": audio_base64
-                        }
-                    }
-                }
-                logger.info(f"Sending audioOutput chunk (len: {len(audio_base64)})")
-                await websocket.send_json(payload)
-                
-            # 3. Handle Turn Transitions (Start)
-            elif event_type in ["BidiResponseStartEvent", "ResponseStartEvent"]:
-                payload = {
-                    "event": {
-                        "contentStart": {
-                            "type": "TEXT",
-                            "role": "ASSISTANT"
-                        }
-                    }
-                }
-                logger.info("Sending contentStart (TEXT)")
-                await websocket.send_json(payload)
-                
-            # 4. Handle Turn Transitions (End)
-            elif event_type in ["BidiResponseCompleteEvent", "ResponseCompleteEvent"]:
-                payload = {
-                    "event": {
-                        "contentEnd": {
-                            "type": "TEXT",
-                            "stopReason": "END_TURN"
-                        }
-                    }
-                }
-                logger.info("Sending contentEnd (TEXT)")
-                await websocket.send_json(payload)
-                
-            # 5. Fallback for other events
-            else:
-                try:
-                    if hasattr(event, "to_dict"):
-                        await websocket.send_json(event.to_dict())
-                    elif hasattr(event, "__dict__"):
-                        await websocket.send_json(event.__dict__)
-                    else:
-                        await websocket.send_json(event)
-                except Exception as ex:
-                    logger.error(f"Failed to serialize outbound event {event_type}: {ex}")
+
+            handled, payload = browser_bridge.translate_output_event(event)
+            if handled:
+                if payload is not None:
+                    await websocket.send_json(payload)
+                return
+
+            try:
+                if hasattr(event, "to_dict"):
+                    await websocket.send_json(event.to_dict())
+                elif hasattr(event, "__dict__"):
+                    await websocket.send_json(event.__dict__)
+                else:
+                    await websocket.send_json(event)
+            except Exception as ex:
+                logger.error(f"Failed to serialize outbound event {event_type}: {ex}")
 
         # Execute BidiAgent with input stream wrapper and output target
         await agent.run(

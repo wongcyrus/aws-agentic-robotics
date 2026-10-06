@@ -229,7 +229,7 @@ describe("AgentCore-backed constructs", () => {
     });
     const policies = JSON.stringify(template.findResources("AWS::IAM::Policy"));
     expect(policies).toContain("bedrock:InvokeModelWithResponseStream");
-    expect(policies).toContain("amazon.nova-2-sonic-v1:0");
+    expect(policies).toContain("amazon.nova-2-5-sonic");
     expect(policies).toContain("cloudfront:GetInvalidation");
     expect(policies).toContain('"Action":"dynamodb:*"');
   });
