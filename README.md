@@ -365,6 +365,12 @@ Features:
 
 The active simulator lives in `humanoid-robot-simulator-serverless/` and is deployed as a static frontend with a Lambda/WebSocket backend. After `./deploy.sh`, open the `humanoidRobotSimulatorServerlessUrl` stack output.
 
+On iPad/Safari, tap the simulator page if prompted to enable speech audio.
+Playback uses the browser's default audio output; an empty `enumerateDevices()`
+speaker list does not mean that speakers are unavailable. Safari may require a
+new tap for later speech clips. Audio/network failures are reported separately.
+Speech playback regression tests: `node --test humanoid-robot-simulator-serverless/frontend/tests/speech_player.test.cjs`.
+
 Features:
 
 - 6 humanoid robots with realistic 3D models

@@ -38,6 +38,9 @@ run_pytest_coverage() {
 echo "==> Core backend coverage"
 "${ROOT_DIR}/scripts/coverage.sh"
 
+echo "==> Simulator speech playback"
+node --test "${ROOT_DIR}/humanoid-robot-simulator-serverless/frontend/tests/speech_player.test.cjs"
+
 echo "==> CDK"
 (
     cd "${ROOT_DIR}/cdk"

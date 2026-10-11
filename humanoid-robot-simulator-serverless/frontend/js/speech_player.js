@@ -21,23 +21,23 @@ class SpeechPlayer {
         /** @type {Map<string, HTMLAudioElement>} robotId → Audio */
         this._channels = new Map();
 
-        /** @type {boolean} */
-        this._deviceAvailable = this._checkAudioDevice();
+        this._pendingPlayback = new Map();
 
         /** @type {boolean} Whether speech playback is enabled (controlled by UI toggle) */
         this.enabled = true;
 
-        // Unlock audio context on first user interaction (mobile / autoplay policy)
-        const unlock = () => {
-            document.removeEventListener('click', unlock);
-            document.removeEventListener('touchstart', unlock);
-            document.removeEventListener('keydown', unlock);
+        const retryPlayback = () => {
+            if (!this.enabled) return;
+            const pending = [...this._pendingPlayback.values()];
+            this._pendingPlayback.clear();
+            // Call play synchronously inside the gesture for Safari's autoplay policy.
+            for (const retry of pending) retry();
         };
-        document.addEventListener('click', unlock, { once: false });
-        document.addEventListener('touchstart', unlock, { once: false });
-        document.addEventListener('keydown', unlock, { once: false });
+        document.addEventListener('click', retryPlayback);
+        document.addEventListener('touchend', retryPlayback);
+        document.addEventListener('keydown', retryPlayback);
 
-        console.log(`🔊 SpeechPlayer initialized (per-robot) — audio device: ${this._deviceAvailable}`);
+        console.log('🔊 SpeechPlayer initialized (per-robot)');
     }
 
     /* ------------------------------------------------------------------ */
@@ -64,9 +64,8 @@ class SpeechPlayer {
             return;
         }
 
-        if (!this._deviceAvailable) {
-            console.warn('🔊 No audio output device detected — speech will not play');
-            this._showNotification('No audio device found', 'warning');
+        if (typeof Audio === 'undefined') {
+            this._showNotification('Audio playback is not supported in this browser', 'error');
             return;
         }
 
@@ -83,7 +82,7 @@ class SpeechPlayer {
         // Named functions for easy removal
         const onEnded = () => {
             console.log(`🔊 [${robotId}] Speech finished`);
-            this._cleanupChannel(robotId, audio, onEnded, onError);
+            this._cleanupChannel(robotId, audio, onEnded, onError, onLoadedMetadata);
         };
 
         const onLoadedMetadata = () => {
@@ -116,22 +115,29 @@ class SpeechPlayer {
         this._channels.set(robotId, audio);
         audio.src = url;
 
-        audio.play().then(() => {
-            console.log(`🔊 [${robotId}] Playback started`);
-            if (text) {
-                this._showNotification(`🗣️ ${robotId}: "${text}"`, 'info');
-            }
-        }).catch((err) => {
-            console.warn(`🔊 [${robotId}] Autoplay blocked:`, err.message);
-            const retryPlay = () => {
-                if (this._channels.get(robotId) === audio) {
-                    audio.play().catch(() => { });
+        const attemptPlayback = () => {
+            if (this._channels.get(robotId) !== audio || !this.enabled) return;
+            this._pendingPlayback.delete(robotId);
+            audio.play().then(() => {
+                if (this._channels.get(robotId) !== audio) return;
+                console.log(`🔊 [${robotId}] Playback started`);
+                if (text) {
+                    this._showNotification(`🗣️ ${robotId}: "${text}"`, 'info');
                 }
-                document.removeEventListener('click', retryPlay);
-            };
-            document.addEventListener('click', retryPlay, { once: true });
-            this._showNotification('Click anywhere to enable speech audio', 'warning');
-        });
+            }).catch((err) => {
+                if (this._channels.get(robotId) !== audio) return;
+                if (err.name === 'NotAllowedError') {
+                    console.warn(`🔊 [${robotId}] Autoplay blocked:`, err.message);
+                    this._pendingPlayback.set(robotId, attemptPlayback);
+                    this._showNotification('Tap or click anywhere to enable speech audio', 'warning');
+                } else {
+                    console.error(`🔊 [${robotId}] Playback failed:`, err);
+                    this._showNotification(`Speech failed for ${robotId}: ${err.message}`, 'error');
+                    this._cleanupChannel(robotId, audio, onEnded, onError, onLoadedMetadata);
+                }
+            });
+        };
+        attemptPlayback();
     }
 
     /**
@@ -139,6 +145,7 @@ class SpeechPlayer {
      * @param {string} robotId
      */
     stop(robotId) {
+        this._pendingPlayback.delete(robotId);
         const audio = this._channels.get(robotId);
         if (audio) {
             try {
@@ -193,6 +200,7 @@ class SpeechPlayer {
         }
         
         if (this._channels.get(robotId) === audio) {
+            this._pendingPlayback.delete(robotId);
             this._channels.delete(robotId);
         }
         
@@ -201,19 +209,6 @@ class SpeechPlayer {
             audio.src = '';
             audio.load();
         } catch (_) { }
-    }
-
-    _checkAudioDevice() {
-        if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-            navigator.mediaDevices.enumerateDevices().then((devices) => {
-                const hasOutput = devices.some((d) => d.kind === 'audiooutput');
-                if (!hasOutput) {
-                    console.warn('🔊 No audio output device detected');
-                    this._deviceAvailable = false;
-                }
-            }).catch(() => { });
-        }
-        return typeof Audio !== 'undefined';
     }
 
     _showNotification(message, type) {
