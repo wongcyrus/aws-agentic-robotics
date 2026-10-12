@@ -17,9 +17,11 @@ popup playback may require a separate tap. MediaPipe library/model downloads
 still require internet access, so this is backend-free rather than fully offline.
 
 Integrated clips appear above the result screen and can be closed manually or
-automatically when playback ends. Browsers that block sound autoplay retry muted
-and offer an Enable sound button; blocked or failed playback exposes an explicit
-play/retry action. Result clips respect the selected playback mode.
+automatically when playback ends. In sound mode, the Start round gesture
+authorizes one persistent media element, which is reused across clips, dismissal,
+and later rounds without per-video sound prompts. Explicit play/retry controls
+remain available only when the browser refuses playback or media fails to load.
+Result clips respect the selected playback mode.
 
 Practice does not sign in, load backend configuration, create game WebSocket or
 WebRTC connections, or call robot, snapshot, or commentary APIs. Multiplayer,
