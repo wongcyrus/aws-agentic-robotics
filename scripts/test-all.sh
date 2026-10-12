@@ -41,6 +41,9 @@ echo "==> Core backend coverage"
 echo "==> Simulator speech playback"
 node --test "${ROOT_DIR}/humanoid-robot-simulator-serverless/frontend/tests/speech_player.test.cjs"
 
+echo "==> Speech frontend startup"
+node --experimental-vm-modules --test "${ROOT_DIR}/speech_control_agentcore/frontend/tests/startup.test.cjs"
+
 echo "==> CDK"
 (
     cd "${ROOT_DIR}/cdk"

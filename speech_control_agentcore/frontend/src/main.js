@@ -1,5 +1,5 @@
 
-import { AudioPlayer } from './lib/play/AudioPlayer.js';
+import { AudioPlayer } from './lib/play/AudioPlayer.js?v=1.0.28';
 import { ChatHistoryManager } from "./lib/util/ChatHistoryManager.js";
 import { setupRobotModal } from './robotModal.js';
 import { initLive2DAvatar } from './live2d-avatar.js?v=1.0.25';
@@ -19,6 +19,31 @@ function setSystemDialogue(message) {
     }
 }
 
+async function withTimeout(promise, duration, message) {
+    let timer;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), duration);
+            })
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function createRuntimeSessionId() {
+    if (typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // Connect to the serverless AWS Bedrock AgentCore with authentication via SigV4 signed WebSocket
 class NativeSocketEmulator {
     constructor() {
@@ -26,6 +51,7 @@ class NativeSocketEmulator {
         this.connected = false;
         this.ws = null;
         this.connectPromise = null;
+        this.lastError = null;
     }
 
     async connect() {
@@ -53,38 +79,51 @@ class NativeSocketEmulator {
         }
 
         this.connectPromise = new Promise(async (resolve, reject) => {
-            const timeoutDuration = 12000; // 12 second global timeout for establishing connection
-            let timeoutId = setTimeout(() => {
-                console.error("Connection attempt timed out globally!");
-                if (this.ws) {
-                    try { this.ws.close(); } catch (e) { }
-                    this.ws = null;
+            let isConnectionSettled = false;
+            let ws;
+            const controller = new AbortController();
+            this.lastError = null;
+            const failConnection = (error) => {
+                if (isConnectionSettled) return;
+                isConnectionSettled = true;
+                clearTimeout(timeoutId);
+                controller.abort();
+                if (ws) {
+                    ws.onopen = null;
+                    ws.onclose = null;
+                    ws.onerror = null;
+                    ws.onmessage = null;
+                    ws.close();
+                    if (this.ws === ws) this.ws = null;
                 }
                 this.connected = false;
-                this.connectPromise = null;
-                reject(new Error("Connection timed out. Please check your network and try again."));
-            }, timeoutDuration);
+                this.lastError = error;
+                this.trigger('connect_error', error);
+                reject(error);
+            };
+            const timeoutId = setTimeout(() => {
+                failConnection(new Error("Runtime connection timed out after 60 seconds. Please check your network and retry."));
+            }, 60000);
 
             try {
                 this.trigger('connecting');
 
                 // 1. Fetch config with timeout
                 console.log("Fetching serverless config.json...");
-                const configResp = await Promise.race([
-                    fetch('/config.json'),
-                    new Promise((_, r) => setTimeout(() => r(new Error("Config fetch timed out")), 5000))
-                ]);
+                const configResp = await withTimeout(
+                    fetch('/config.json', { signal: controller.signal }),
+                    15000, "Config fetch timed out"
+                );
                 if (!configResp.ok) throw new Error("Could not fetch serverless config.json");
                 const config = await configResp.json();
+                if (isConnectionSettled) return;
 
                 // 2. Retrieve identity ID token from storage
                 const idToken = localStorage.getItem('idToken');
                 if (!idToken) {
                     console.warn("No ID Token found. Redirecting to login.");
                     window.location.href = '/login.html';
-                    clearTimeout(timeoutId);
-                    this.connectPromise = null;
-                    return;
+                    throw new Error("Authentication error: please sign in again.");
                 }
 
                 // 3. Authenticate with Federated Identity Pool and get credentials with timeout
@@ -94,6 +133,7 @@ class NativeSocketEmulator {
                 const cognitoPromise = (async () => {
                     const idResponse = await fetch(`https://cognito-identity.${config.region}.amazonaws.com/`, {
                         method: "POST",
+                        signal: controller.signal,
                         headers: {
                             "Content-Type": "application/x-amz-json-1.1",
                             "X-Amz-Target": "AWSCognitoIdentityService.GetId"
@@ -103,11 +143,15 @@ class NativeSocketEmulator {
                             Logins: { [providerName]: idToken }
                         })
                     });
-                    if (!idResponse.ok) throw new Error("Failed to retrieve Identity ID from Cognito.");
+                    if (!idResponse.ok) {
+                        const error = await idResponse.json();
+                        throw new Error(`Cognito identity request failed: ${error.message || error.__type || idResponse.status}`);
+                    }
                     const { IdentityId } = await idResponse.json();
 
                     const credsResponse = await fetch(`https://cognito-identity.${config.region}.amazonaws.com/`, {
                         method: "POST",
+                        signal: controller.signal,
                         headers: {
                             "Content-Type": "application/x-amz-json-1.1",
                             "X-Amz-Target": "AWSCognitoIdentityService.GetCredentialsForIdentity"
@@ -117,7 +161,10 @@ class NativeSocketEmulator {
                             Logins: { [providerName]: idToken }
                         })
                     });
-                    if (!credsResponse.ok) throw new Error("Failed to retrieve credentials from Cognito.");
+                    if (!credsResponse.ok) {
+                        const error = await credsResponse.json();
+                        throw new Error(`Cognito credentials request failed: ${error.message || error.__type || credsResponse.status}`);
+                    }
                     const { Credentials } = await credsResponse.json();
                     return {
                         accessKeyId: Credentials.AccessKeyId,
@@ -126,10 +173,10 @@ class NativeSocketEmulator {
                     };
                 })();
 
-                const credentials = await Promise.race([
-                    cognitoPromise,
-                    new Promise((_, r) => setTimeout(() => r(new Error("Cognito credentials fetch timed out")), 5000))
-                ]);
+                const credentials = await withTimeout(
+                    cognitoPromise, 20000, "Cognito credentials fetch timed out"
+                );
+                if (isConnectionSettled) return;
 
                 // 4. Load ESM SigV4 signer modules dynamically from ESM CDN with timeout
                 console.log("Loading ESM Signature modules...");
@@ -140,17 +187,17 @@ class NativeSocketEmulator {
                     return { SignatureV4, Sha256, HttpRequest };
                 })();
 
-                const { SignatureV4, Sha256, HttpRequest } = await Promise.race([
-                    esmPromise,
-                    new Promise((_, r) => setTimeout(() => r(new Error("ESM modules load timed out (esm.sh network issue)")), 6000))
-                ]);
+                const { SignatureV4, Sha256, HttpRequest } = await withTimeout(
+                    esmPromise, 20000, "Signing modules load timed out (esm.sh network issue)"
+                );
+                if (isConnectionSettled) return;
 
                 // 5. Presign the AWS Bedrock AgentCore websocket URL
                 const encodedArn = encodeURIComponent(config.runtimeArn);
                 const host = `bedrock-agentcore.${config.region}.amazonaws.com`;
                 const path = `/runtimes/${encodedArn}/ws`;
                 const voiceId = getQueryParams().voice_id || 'tiffany';
-                const runtimeSessionId = crypto.randomUUID();
+                const runtimeSessionId = createRuntimeSessionId();
 
                 const selectedRobots = getSelectedRobots();
                 const robotsParam = selectedRobots.length > 0 ? selectedRobots.join(',') : 'all';
@@ -177,14 +224,13 @@ class NativeSocketEmulator {
 
                 console.log("Generating IAM SigV4 pre-signed signature...");
                 const signedRequest = await signer.presign(request, { expiresIn: 300 });
+                if (isConnectionSettled) return;
                 const queryParams = new URLSearchParams(signedRequest.query);
                 const wsUrl = `wss://${host}${path}?${queryParams.toString()}`;
 
                 console.log(`Connecting to serverless AWS Bedrock AgentCore WebSocket...`);
-                const ws = new WebSocket(wsUrl);
+                ws = new WebSocket(wsUrl);
                 this.ws = ws;
-
-                let isConnectionSettled = false;
 
                 ws.onopen = () => {
                     console.log("WebSocket connection established!");
@@ -198,26 +244,28 @@ class NativeSocketEmulator {
                 };
 
                 ws.onclose = (event) => {
+                    if (this.ws !== ws) return;
                     console.log(`WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
                     clearTimeout(timeoutId);
                     this.connected = false;
-                    this.trigger('disconnect');
-                    this.connectPromise = null;
                     if (!isConnectionSettled) {
-                        isConnectionSettled = true;
-                        reject(new Error(`WebSocket connection closed: code=${event.code}`));
+                        failConnection(new Error(`Runtime connection closed: code=${event.code}${event.reason ? `, ${event.reason}` : ''}`));
+                    } else {
+                        if (event.code !== 1000) {
+                            this.lastError ??= new Error(`Runtime connection closed: code=${event.code}${event.reason ? `, ${event.reason}` : ''}`);
+                        }
+                        this.trigger('disconnect', this.lastError);
                     }
                 };
 
                 ws.onerror = (error) => {
+                    if (this.ws !== ws) return;
                     console.error("WebSocket transport error:", error);
-                    clearTimeout(timeoutId);
-                    this.connected = false;
-                    this.trigger('error', error);
-                    this.connectPromise = null;
                     if (!isConnectionSettled) {
-                        isConnectionSettled = true;
-                        reject(error);
+                        failConnection(new Error("Runtime WebSocket connection failed. Check your network and sign in again if needed."));
+                    } else {
+                        this.lastError = new Error("Runtime WebSocket transport failed.");
+                        this.trigger('error', this.lastError);
                     }
                 };
 
@@ -225,6 +273,9 @@ class NativeSocketEmulator {
                     try {
                         console.log("📥 Raw WebSocket Message from Bedrock AgentCore:", event.data);
                         const payload = JSON.parse(event.data);
+                        if (payload.type === 'error') {
+                            this.lastError = new Error(payload.message || "Runtime reported an error.");
+                        }
                         if (payload.type) {
                             this.trigger(payload.type, payload);
                         } else if (payload.event) {
@@ -242,12 +293,10 @@ class NativeSocketEmulator {
 
             } catch (err) {
                 console.error("Failed to establish serverless AgentCore connection:", err);
-                clearTimeout(timeoutId);
-                this.connected = false;
-                this.connectPromise = null;
-                this.trigger('connect_error', err);
-                reject(err);
+                failConnection(err);
             }
+        }).finally(() => {
+            this.connectPromise = null;
         });
 
         return this.connectPromise;
@@ -337,6 +386,7 @@ const chatHistoryManager = ChatHistoryManager.getInstance(
 let audioContext;
 let audioStream;
 let isStreaming = false;
+let isStarting = false;
 let processor;
 let sourceNode;
 let waitingForAssistantResponse = false;
@@ -452,28 +502,36 @@ async function initAudio() {
         statusElement.textContent = "Requesting microphone access...";
         statusElement.className = "connecting";
 
-        // Request microphone access
-        audioStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
-        });
-
-        audioContext = new AudioContext({
-            sampleRate: 16000
-        });
-
-        await audioPlayer.start();
+        audioContext ??= new AudioContext({ sampleRate: 16000 });
+        const context = audioContext;
+        // Resume both contexts before awaiting microphone permission on iOS.
+        const captureReady = audioContext.resume();
+        const playbackReady = audioPlayer.start();
+        const microphoneReady = audioStream ? Promise.resolve(audioStream) :
+            navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            }).then(stream => {
+                if (audioContext !== context) {
+                    stream.getTracks().forEach(track => track.stop());
+                    throw new Error("Microphone initialization was cancelled.");
+                }
+                audioStream = stream;
+                return stream;
+            });
+        await Promise.all([captureReady, playbackReady, microphoneReady]);
 
         statusElement.textContent = "Microphone ready. Click Start to begin.";
         statusElement.className = "ready";
-        startButton.disabled = false;
     } catch (error) {
         console.error("Error accessing microphone:", error);
         statusElement.textContent = "Error: " + error.message;
         statusElement.className = "error";
+        releaseAudio();
+        throw error;
     }
 }
 
@@ -501,28 +559,20 @@ async function initializeSession() {
         console.error("Failed to initialize session:", error);
         statusElement.textContent = "Error: " + error.message;
         statusElement.className = "error";
+        throw error;
     }
 }
 
 async function startStreaming() {
-    if (isStreaming) return;
+    if (isStreaming || isStarting) return;
+    isStarting = true;
 
     // Instantly halt any running AI typewriter/synchronization loop
     stopSyncLoop();
 
     try {
-        // Lazily initialize microphone and audio context upon first user-click interaction!
-        // This complies 100% with iOS Safari user gesture requirements.
-        if (!audioContext || !audioStream) {
-            await initAudio();
-            if (!audioContext || !audioStream) {
-                return; // Error status is already set inside initAudio()
-            }
-        }
-
-        if (audioContext.state === 'suspended') {
-            await audioContext.resume();
-        }
+        startButton.disabled = true;
+        await initAudio();
 
         // First, make sure the session is initialized
         if (!sessionInitialized) {
@@ -530,7 +580,7 @@ async function startStreaming() {
         }
 
         if (!socket.ws || socket.ws.readyState !== WebSocket.OPEN) {
-            throw new Error("Runtime connection closed before audio streaming could start.");
+            throw socket.lastError || new Error("Runtime connection is not open. Please retry Start Streaming.");
         }
 
         // Reset any previous audio graph before wiring a new stream.
@@ -593,6 +643,8 @@ async function startStreaming() {
 
             sourceNode.connect(processor);
             processor.connect(audioContext.destination);
+        } else {
+            throw new Error("Microphone audio processing is not supported in this browser.");
         }
 
         socket.emit('audioStart');
@@ -607,8 +659,18 @@ async function startStreaming() {
 
     } catch (error) {
         console.error("Error starting recording:", error);
+        isStreaming = false;
+        sessionInitialized = false;
+        releaseAudio();
+        if (socket.ws && socket.ws.readyState === WebSocket.OPEN) {
+            socket.ws.close();
+        }
+        startButton.disabled = false;
+        stopButton.disabled = true;
         statusElement.textContent = "Error: " + error.message;
         statusElement.className = "error";
+    } finally {
+        isStarting = false;
     }
 }
 
@@ -642,7 +704,21 @@ function stopStreaming() {
 
     isStreaming = false;
 
-    // Clean up audio processing
+    releaseAudio();
+
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    statusElement.textContent = "Processing...";
+    statusElement.className = "processing";
+
+    // Tell server to finalize processing
+    socket.emit('stopAudio');
+
+    // End the current turn in chat history
+    chatHistoryManager.endTurn();
+}
+
+function releaseAudio() {
     if (processor) {
         processor.disconnect();
         processor = null;
@@ -651,18 +727,15 @@ function stopStreaming() {
         sourceNode.disconnect();
         sourceNode = null;
     }
-
-    startButton.disabled = false;
-    stopButton.disabled = true;
-    statusElement.textContent = "Processing...";
-    statusElement.className = "processing";
-
+    if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+    }
+    if (audioContext) {
+        audioContext.close().catch(error => console.warn("Error closing microphone audio context:", error));
+        audioContext = null;
+    }
     audioPlayer.stop();
-    // Tell server to finalize processing
-    socket.emit('stopAudio');
-
-    // End the current turn in chat history
-    chatHistoryManager.endTurn();
 }
 
 // Base64 to Float32Array conversion with robust WAV header stripping
@@ -1104,39 +1177,23 @@ socket.on('connect', () => {
     sessionInitialized = false;
 });
 
-socket.on('disconnect', () => {
+socket.on('disconnect', (error) => {
     console.log("WebSocket disconnected. Cleaning up streaming state...");
 
-    // Clean up audio processing if active
-    if (isStreaming) {
-        isStreaming = false;
-        if (processor) {
-            try {
-                processor.disconnect();
-            } catch (e) {
-                console.warn("Error disconnecting audio nodes:", e);
-            }
-            processor = null;
-        }
-        if (sourceNode) {
-            try {
-                sourceNode.disconnect();
-            } catch (e) {
-                console.warn("Error disconnecting source node:", e);
-            }
-            sourceNode = null;
-        }
-        audioPlayer.stop();
-    }
+    isStreaming = false;
+    releaseAudio();
 
-    if (hasStartedSession) {
+    if (error && error.message) {
+        statusElement.textContent = "Error: " + error.message;
+        setSystemDialogue(error.message);
+    } else if (hasStartedSession) {
         statusElement.textContent = "Session ended (finished or timed out). Click Start to resume.";
         setSystemDialogue("Session ended. Click Start Streaming to reconnect.");
     } else {
         statusElement.textContent = "Disconnected. Click Start Streaming to connect.";
         setSystemDialogue("AI Core is idle. Click Start Streaming to connect.");
     }
-    statusElement.className = "disconnected";
+    statusElement.className = error ? "error" : "disconnected";
     startButton.disabled = false; // Keep start button enabled for instant reconnection!
     stopButton.disabled = true;
     sessionInitialized = false;
@@ -1162,6 +1219,9 @@ socket.on('connect_error', (error) => {
 // Handle errors
 socket.on('error', (error) => {
     console.error("Server error:", error);
+    isStreaming = false;
+    sessionInitialized = false;
+    releaseAudio();
     statusElement.textContent = "Error: " + (error.message || JSON.stringify(error).substring(0, 100));
     statusElement.className = "error";
     setSystemDialogue("AI Core reported an error. Please retry the session.");
@@ -1189,16 +1249,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             robotSelect.value = robotValue;
             console.log(`Auto-selected robot: ${robotValue} from URL parameter`);
 
-            // Start streaming after a short delay
-            setTimeout(() => {
-                console.log("Auto-starting streaming...");
-                startStreaming();
-            }, 3000);
+            setSystemDialogue("Robot selected. Tap Start Streaming to enable microphone and audio.");
         }
     }
 });
 
-// Auto-start if robot parameter is present
+// Preselect the robot; microphone capture must start from a user gesture.
 const queryParams = getQueryParams();
 if (queryParams.robot) {
     robotSelect.value = queryParams.robot;

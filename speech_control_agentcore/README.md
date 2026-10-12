@@ -50,6 +50,25 @@ This cockpit features several advanced, state-of-the-art interactive systems:
 
 ## 🚀 Running Locally
 
+### iOS Safari startup
+
+Tap **Start Streaming** to initialize microphone capture and speaker playback
+within the same user interaction. Microphone permission alone does not establish
+the authenticated AgentCore connection. Startup allows up to 60 seconds for
+authentication, signing-module downloads, and runtime cold starts. Failures show
+the original connection error and release the microphone; tap Start to retry.
+Both capture and playback are reinitialized when restarting a stopped session.
+The `?robot=...` URL parameter preselects a device but no longer starts recording
+automatically; tap Start to grant Safari's required audio user interaction.
+Older Safari versions without `crypto.randomUUID()` use `crypto.getRandomValues()`
+to generate a secure UUIDv4 runtime session ID.
+
+Frontend startup regression tests (no AWS credentials or microphone required):
+
+```bash
+node --experimental-vm-modules --test speech_control_agentcore/frontend/tests/startup.test.cjs
+```
+
 To run the voice control component locally for development:
 
 ### 1. Prerequisites

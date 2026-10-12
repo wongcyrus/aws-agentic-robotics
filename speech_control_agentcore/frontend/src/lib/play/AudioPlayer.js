@@ -31,11 +31,20 @@ export class AudioPlayer {
     }
 
     async start() {
+        if (this.initialized) {
+            await this.audioContext.resume();
+            return;
+        }
         this.audioContext = new AudioContext({ "sampleRate": 16000 });
+        const context = this.audioContext;
+        const playbackReady = context.resume();
 
         // Chrome caches worklet code more aggressively, so add a nocache parameter to make sure we get the latest
-        await this.audioContext.audioWorklet.addModule(AudioPlayerWorkletUrl);
-        this.workletNode = new AudioWorkletNode(this.audioContext, "audio-player-processor");
+        await Promise.all([playbackReady, context.audioWorklet.addModule(AudioPlayerWorkletUrl)]);
+        if (this.audioContext !== context) {
+            throw new Error("Audio playback initialization was cancelled.");
+        }
+        this.workletNode = new AudioWorkletNode(context, "audio-player-processor");
         
         // Listen for high-priority background volume calculations from the AudioWorklet
         this.workletNode.port.onmessage = (event) => {
@@ -64,7 +73,7 @@ export class AudioPlayer {
 
     stop() {
         if (ObjectExt.exists(this.audioContext)) {
-            this.audioContext.close();
+            this.audioContext.close().catch(error => console.warn("Error closing playback audio context:", error));
         }
 
         if (ObjectExt.exists(this.workletNode)) {
