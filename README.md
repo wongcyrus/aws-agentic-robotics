@@ -4,10 +4,6 @@ A comprehensive voice-controlled robotics platform powered by AWS IoT, AWS Bedro
 
 **Play solo practice:** [Domain Expansion AR Game](https://wongcyrus.github.io/domain-expansion-ar-game/) (no login or game backend required).
 
-## Demo
-
-[![Watch the Domain Expansion AR demo on YouTube](https://img.youtube.com/vi/Tck6WSV_YXQ/hqdefault.jpg)](https://www.youtube.com/watch?v=Tck6WSV_YXQ)
-
 ## 📚 Documentation
 
 See the consolidated documentation index in [docs/README.md](docs/README.md), review our [AWS Cloud System Architecture Specification](docs/AWS_ARCHITECTURE.md), or check out our [AWS Cost Estimation & Optimization Guide](docs/COST_ESTIMATION.md).
