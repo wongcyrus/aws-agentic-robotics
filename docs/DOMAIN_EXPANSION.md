@@ -16,10 +16,19 @@ and optional popup playback. Camera access requires HTTPS or localhost; mobile
 popup playback may require a separate tap. MediaPipe library/model downloads
 still require internet access, so this is backend-free rather than fully offline.
 
+Integrated clips appear above the result screen and can be closed manually or
+automatically when playback ends. Browsers that block sound autoplay retry muted
+and offer an Enable sound button; blocked or failed playback exposes an explicit
+play/retry action. Result clips respect the selected playback mode.
+
 Practice does not sign in, load backend configuration, create game WebSocket or
 WebRTC connections, or call robot, snapshot, or commentary APIs. Multiplayer,
 robot control, and AI commentary remain AWS-only features. Practice settings use
 `domain-expansion.practice.settings`, separate from the AWS settings profile.
+Images, technique/result videos, and legacy VFX are served from the GitHub Pages
+artifact under its project path. They do not use the AWS website, buckets, or
+CloudFront distribution, so changing the AWS deployment does not change practice
+media URLs.
 
 The game submodule's `.github/workflows/practice-pages.yml` publishes pushes to
 its `main` branch and supports manual dispatch. GitHub Pages uses **GitHub
