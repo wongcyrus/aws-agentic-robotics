@@ -3,9 +3,35 @@
 Domain Expansion is the gesture-controlled multiplayer AR game in the
 `aws-agentic-robotics` stack. The primary frontend lives in the
 `domain-expansion-ar-game` Git submodule and the Lambda backend lives in
-`domain-expansion-ar-game-serverless`.
+`domain-expansion-ar-game-serverless`. A separate GitHub Pages build provides
+solo practice without the AWS game backend.
 
-## Runtime architecture
+## GitHub Pages solo practice
+
+**Live site:** https://wongcyrus.github.io/domain-expansion-ar-game/
+
+Allow camera access and tap **Start round**. Practice includes camera gesture
+recognition, canvas VFX, solo scoring, challenge timers, technique/result videos,
+and optional popup playback. Camera access requires HTTPS or localhost; mobile
+popup playback may require a separate tap. MediaPipe library/model downloads
+still require internet access, so this is backend-free rather than fully offline.
+
+Practice does not sign in, load backend configuration, create game WebSocket or
+WebRTC connections, or call robot, snapshot, or commentary APIs. Multiplayer,
+robot control, and AI commentary remain AWS-only features. Practice settings use
+`domain-expansion.practice.settings`, separate from the AWS settings profile.
+
+The game submodule's `.github/workflows/practice-pages.yml` publishes pushes to
+its `main` branch and supports manual dispatch. GitHub Pages uses **GitHub
+Actions** as its publishing source. The workflow runs coverage tests, checks the
+existing AWS build, builds practice, and runs static browser scenarios before
+publishing only `dist-practice/`. It does not deploy AWS infrastructure, upload
+AWS frontend files, or invalidate CloudFront.
+
+See the [game README](../domain-expansion-ar-game/README.md#github-pages-solo-practice)
+for local static-server commands, base-path configuration, and live browser checks.
+
+## AWS runtime architecture
 
 ```mermaid
 flowchart LR
@@ -50,7 +76,7 @@ camera streams remain peer-to-peer through WebRTC; API Gateway WebSocket carries
 only authoritative game commands, snapshots of room state, and WebRTC
 negotiation messages.
 
-## Frontend surfaces
+## AWS frontend surfaces
 
 | Path | Purpose |
 | --- | --- |
@@ -125,7 +151,7 @@ When AWS TTS is selected, Lambda synthesizes the returned commentary with
 Polly, stores the MP3 under the commentary audio prefix, and returns a
 short-lived signed URL. Browser speech remains the other explicit TTS mode.
 
-## Authentication and authorization
+## AWS authentication and authorization
 
 - The browser signs in through the shared Cognito user pool.
 - Protected REST endpoints require a Cognito ID token.
@@ -152,7 +178,7 @@ Open:
 The local coordinator implements the same match phases, recognition timestamp
 rules, challenge expiry, and WebSocket envelopes as AWS.
 
-## Deployment
+## AWS deployment
 
 Domain Expansion is part of the single `aws-agentic-robotics` CloudFormation
 stack:
@@ -193,6 +219,13 @@ Focused game validation:
 npm --prefix domain-expansion-ar-game test
 npm --prefix domain-expansion-ar-game run build
 npm --prefix domain-expansion-ar-game run test:e2e:local
+```
+
+Standalone practice browser checks build `dist-practice/` and use only a local
+static file server; no AWS credentials or game coordinator are required:
+
+```bash
+npm --prefix domain-expansion-ar-game run test:e2e:practice
 ```
 
 Trigger all deployed commentary engines through HTTPS:

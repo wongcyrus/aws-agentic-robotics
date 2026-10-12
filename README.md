@@ -2,6 +2,8 @@
 
 A comprehensive voice-controlled robotics platform powered by AWS IoT, AWS Bedrock, and Amazon Nova. This project enables natural language control of humanoid robots and digital-human presenters through voice and text interfaces, with real-time 3D visualization, simulation capabilities, and secure authentication.
 
+**Play solo practice:** [Domain Expansion AR Game](https://wongcyrus.github.io/domain-expansion-ar-game/) (no login or game backend required).
+
 ## 📚 Documentation
 
 See the consolidated documentation index in [docs/README.md](docs/README.md), review our [AWS Cloud System Architecture Specification](docs/AWS_ARCHITECTURE.md), or check out our [AWS Cost Estimation & Optimization Guide](docs/COST_ESTIMATION.md).
@@ -70,6 +72,7 @@ The system consists of several interconnected components:
    - Authoritative multiplayer state through API Gateway WebSocket and DynamoDB
    - Cognito-protected REST APIs for snapshots, robot actions, and AI commentary
    - Strands, dedicated AgentCore Runtime, and OpenClaw commentary engines
+   - [Standalone solo practice on GitHub Pages](https://wongcyrus.github.io/domain-expansion-ar-game/), with no login or game backend
    - Desktop, iPad, and Android tablet layouts
    - See [Domain Expansion architecture and operations](docs/DOMAIN_EXPANSION.md)
 
@@ -103,6 +106,18 @@ git submodule update --init --recursive
 ```
 
 ---
+
+### Play Solo Practice Without AWS Setup
+
+Open [Domain Expansion solo practice](https://wongcyrus.github.io/domain-expansion-ar-game/),
+allow camera access, and tap **Start round**. Recognition, VFX, scoring, timers,
+and technique/result videos run in the browser. Internet access is still needed
+for MediaPipe's CDN-hosted recognition assets.
+
+Practice uses a separate static build and settings profile. It does not require
+AWS credentials or Cognito login, connect to the game backend, or control robots.
+Its GitHub Pages deployment does not redeploy the existing AWS multiplayer site.
+See [practice build and publishing instructions](domain-expansion-ar-game/README.md#github-pages-solo-practice).
 
 ### Prerequisites
 

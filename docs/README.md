@@ -10,6 +10,8 @@ Generated: 2026-06-27 01:11 UTC
 - [Repository README](../README.md)
 - [AWS Cost Estimation Guide](COST_ESTIMATION.md)
 - [Domain Expansion AR Game](DOMAIN_EXPANSION.md)
+- [Play Domain Expansion Solo Practice](https://wongcyrus.github.io/domain-expansion-ar-game/)
+- [GitHub Pages Solo Practice](DOMAIN_EXPANSION.md#github-pages-solo-practice)
 - [Text Control: README](../text_control/README.md)
 - [Speech Control: README](../speech_control_agentcore/README.md)
 - [CDK Infrastructure: README](../cdk/README.md)
@@ -29,6 +31,7 @@ Generated: 2026-06-27 01:11 UTC
 
 - [Readme](../domain-expansion-ar-game/README.md)
 - [Architecture and Operations](DOMAIN_EXPANSION.md)
+- [Solo Practice Build and Publishing](../domain-expansion-ar-game/README.md#github-pages-solo-practice)
 
 ### domain-expansion-commentator-agentcore (2)
 
