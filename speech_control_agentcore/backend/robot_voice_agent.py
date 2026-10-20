@@ -50,6 +50,18 @@ AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION", "us-east-1")
 NOVA_SONIC_MODEL_ID = os.environ.get(
     "NOVA_SONIC_MODEL_ID", "amazon.nova-2-5-sonic"
 )
+REPLY_LANGUAGES = {
+    "auto": None,
+    "en": "English",
+    "fr": "French",
+    "it": "Italian",
+    "de": "German",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "hi": "Hindi",
+    "zh-CN": "Mandarin Chinese",
+    "yue-HK": "Hong Kong Cantonese",
+}
 
 
 def load_system_prompt() -> str:
@@ -67,8 +79,10 @@ Map natural action phrases like "stand up", "go forward", and "wave" to the clos
 Keep spoken replies concise and action-oriented."""
 
 
-def generate_dynamic_prompt(robots: list) -> str:
+def generate_dynamic_prompt(robots: list, reply_language: str = "auto") -> str:
     """Dynamically adjust prompt based on selected hardware devices."""
+    if reply_language not in REPLY_LANGUAGES:
+        raise ValueError("Unsupported reply language selection.")
     base_prompt = load_system_prompt()
     
     supported_devices = [
@@ -114,7 +128,32 @@ def generate_dynamic_prompt(robots: list) -> str:
             dynamic_instruction += "- Coordinate and execute tools strictly targeting the specific devices that are checked above.\n"
             
     dynamic_instruction += "\n=========================================="
-    return base_prompt + dynamic_instruction
+    language_instruction = "\n\n=== REPLY LANGUAGE POLICY ===\n"
+    if reply_language == "auto":
+        language_instruction += (
+            "Always reply in the language spoken by the user in their latest turn. "
+            "If the user switches languages, follow their new language. "
+            "Do not mix in English unless the user is speaking English. "
+            "Use the same language for greetings, action confirmations, errors, "
+            "clarifying questions, and summaries of tool results. "
+            "If the latest turn's language is unclear, keep the last clearly spoken language."
+        )
+    else:
+        language_instruction += (
+            f"Always give spoken replies in {REPLY_LANGUAGES[reply_language]}, "
+            "including greetings, action confirmations, errors, clarifying questions, "
+            "and summaries of tool results. "
+            "Keep this reply language even when the user speaks another language or "
+            "tool results contain another language. Do not automatically switch "
+            "languages or code-switch."
+        )
+    language_instruction += (
+        "\nReferences to languages elsewhere in the prompt describe context, "
+        "not the reply-language selection. "
+        "Keep tool names, device identifiers, and tool arguments unchanged."
+        "\n=========================================="
+    )
+    return base_prompt + dynamic_instruction + language_instruction
 
 
 @asynccontextmanager
@@ -252,21 +291,53 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # Parse voice selection
     voice_id = websocket.query_params.get("voice_id", "tiffany")
+    reply_language = websocket.query_params.get("reply_language", "auto")
+    if reply_language not in REPLY_LANGUAGES:
+        logger.warning("Rejected unsupported reply language selection: %r", reply_language)
+        await websocket.send_json(
+            {"type": "error", "message": "Unsupported reply language selection."}
+        )
+        await websocket.close(code=1008, reason="Unsupported reply language selection")
+        return
 
-    # 1. Initialize immediately from query parameters so AgentCore doesn't sit idle
-    # waiting for the first frontend message after the socket has already opened.
     robots_param = websocket.query_params.get("robots", "all")
     robots = [item.strip() for item in robots_param.split(",") if item.strip()]
     if not robots:
         robots = ["all"]
-    logger.info(f"Handshake - Initial selected robots from query params: {robots}")
-
-    # Set active session state
-    selected_robots_var.set(robots)
 
     try:
+        # AgentCore does not forward the browser's custom URL query parameters.
+        try:
+            first_input = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+        except TimeoutError:
+            logger.warning("Timed out waiting for the initial session configuration")
+            await websocket.send_json(
+                {"type": "error", "message": "Session initialization timed out. Please retry Start Streaming."}
+            )
+            await websocket.close(code=1008, reason="Session initialization timed out")
+            return
+        pending_input = first_input
+        if first_input.get("type") == "robot":
+            reply_language = first_input.get("reply_language", reply_language)
+            if not isinstance(reply_language, str) or reply_language not in REPLY_LANGUAGES:
+                logger.warning("Rejected unsupported reply language in startup message")
+                await websocket.send_json(
+                    {"type": "error", "message": "Unsupported reply language selection."}
+                )
+                await websocket.close(code=1008, reason="Unsupported reply language selection")
+                return
+            voice_id = first_input.get("voice_id", voice_id)
+            robots = first_input.get("robots", robots)
+            if isinstance(robots, str):
+                robots = [robots]
+            if not isinstance(robots, list) or not all(isinstance(item, str) for item in robots):
+                raise ValueError("Selected devices must be a list of device identifiers.")
+            pending_input = None
+            await websocket.send_json({"type": "robot_received", "robots": robots})
+        selected_robots_var.set(robots)
+
         # 2. Compile dynamic system prompt and load tools
-        system_prompt = generate_dynamic_prompt(robots)
+        system_prompt = generate_dynamic_prompt(robots, reply_language)
         tools = get_all_tools()
         logger.info(f"Loaded {len(tools)} tools. Initial system prompt compiled for: {robots}")
 
@@ -292,9 +363,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Converter function to map incoming websocket JSON payloads into Strands Events
         async def receive_and_convert():
+            nonlocal pending_input
             while True:
                 try:
-                    data = await websocket.receive_json()
+                    if pending_input is not None:
+                        data = pending_input
+                        pending_input = None
+                    else:
+                        data = await websocket.receive_json()
                 except WebSocketDisconnect:
                     logger.info("WebSocket client disconnected abruptly.")
                     raise
@@ -318,7 +394,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     # Dynamically adjust the system prompt on the active BidiAgent instance
                     try:
-                        dynamic_prompt = generate_dynamic_prompt(robots_val)
+                        dynamic_prompt = generate_dynamic_prompt(robots_val, reply_language)
                         agent.system_prompt = dynamic_prompt
                         logger.info(f"System prompt dynamically updated mid-session for {len(robots_val)} devices: {robots_val}")
                     except Exception as e:

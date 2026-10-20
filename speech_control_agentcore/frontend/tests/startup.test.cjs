@@ -45,7 +45,9 @@ async function setup(options = {}) {
     function element() {
         return {
             disabled: false, selectedOptions: [{ value: 'robot_1' }],
-            addEventListener() {}, appendChild() {}, remove() {},
+            listeners: {},
+            addEventListener(event, callback) { this.listeners[event] = callback; },
+            appendChild() {}, remove() {},
             classList: { add() {}, remove() {} },
             style: {}, querySelectorAll: () => [], textContent: '',
         };
@@ -56,6 +58,9 @@ async function setup(options = {}) {
     const sockets = [];
     const requests = [];
     const processors = [];
+    const storage = new Map(options.savedLanguage === undefined ? [] : [
+        ['speech-control.reply-language', options.savedLanguage],
+    ]);
     class AudioContext {
         constructor() {
             this.state = 'suspended';
@@ -107,14 +112,34 @@ async function setup(options = {}) {
         setTimeout, clearTimeout: id => timers.delete(id),
         setInterval: () => 0, clearInterval() {},
         btoa: value => Buffer.from(value, 'binary').toString('base64'),
-        localStorage: { getItem: () => options.noToken ? null : 'test-token', clear() {} },
+        localStorage: {
+            getItem(key) {
+                if (key === 'idToken') return options.noToken ? null : 'test-token';
+                if (options.storageReadError) throw new Error('Storage unavailable');
+                return storage.get(key) ?? null;
+            },
+            setItem(key, value) {
+                if (options.storageWriteError) throw new Error('Storage unavailable');
+                storage.set(key, value);
+            },
+            clear() { storage.clear(); },
+        },
         window: { location: { search: options.search || '', href: '' } },
         document: {
             addEventListener(event, callback) {
                 if (event === 'DOMContentLoaded') this.onReady = callback;
             },
             getElementById(id) {
-                if (!elements.has(id)) elements.set(id, element());
+                if (!elements.has(id)) {
+                    const el = element();
+                    if (id === 'reply-language') {
+                        const html = readFileSync(resolve(frontend, 'index.html'), 'utf8');
+                        const select = html.match(/<select id="reply-language"[^>]*>([\s\S]*?)<\/select>/)[1];
+                        el.options = [...select.matchAll(/<option value="([^"]+)"/g)]
+                            .map(match => ({ value: match[1] }));
+                    }
+                    elements.set(id, el);
+                }
                 return elements.get(id);
             },
             createElement: element,
@@ -185,7 +210,7 @@ async function setup(options = {}) {
         throw new Error(`Unexpected import: ${specifier}`);
     });
     await main.evaluate();
-    return { ...main.namespace, contexts, streams, sockets, requests, processors, elements, timers, advance,
+    return { ...main.namespace, contexts, streams, sockets, requests, processors, elements, timers, advance, storage,
         document: context.document };
 }
 
@@ -402,4 +427,125 @@ test('modern browsers retain the native randomUUID session ID', async () => {
     assert.equal(id, '00000000-0000-4000-8000-000000000001');
     env.sockets[0].open();
     await connected;
+});
+
+test('reply language defaults to Auto and is sent in the initial configuration frame', async () => {
+    const env = await setup();
+    assert.equal(env.elements.get('reply-language').value, 'auto');
+    assert.match(env.elements.get('reply-language-help').textContent, /language you speak/);
+    const connected = env.startStreaming();
+    await flush();
+    assert.equal(new URL(env.sockets[0].url).searchParams.has('reply_language'), false);
+    env.sockets[0].open();
+    await connected;
+    assert.equal(env.sockets[0].sent[0].type, 'robot');
+    assert.equal(env.sockets[0].sent[0].reply_language, 'auto');
+    env.stopStreaming();
+});
+
+test('each language option is restored and forwarded without altering voice selection', async () => {
+    const html = readFileSync(resolve(frontend, 'index.html'), 'utf8');
+    const select = html.match(/<select id="reply-language"[^>]*>([\s\S]*?)<\/select>/)[1];
+    for (const [, language] of select.matchAll(/<option value="([^"]+)"/g)) {
+        const env = await setup({ savedLanguage: language, search: '?voice_id=matthew' });
+        assert.equal(env.elements.get('reply-language').value, language);
+        const connected = env.startStreaming();
+        await flush();
+        const params = new URL(env.sockets[0].url).searchParams;
+        assert.equal(params.get('voice_id'), 'matthew');
+        if (['zh-CN', 'yue-HK'].includes(language)) {
+            assert.match(env.elements.get('reply-language-help').textContent, /Experimental/);
+        }
+        env.sockets[0].open();
+        await connected;
+        assert.equal(env.sockets[0].sent[0].reply_language, language);
+        assert.equal(env.sockets[0].sent[0].voice_id, 'matthew');
+        env.stopStreaming();
+    }
+});
+
+test('changing language ends streaming and applies the saved policy in a fresh session', async () => {
+    const env = await setup();
+    const started = env.startStreaming();
+    await flush();
+    env.sockets[0].open();
+    await started;
+    const selector = env.elements.get('reply-language');
+    selector.value = 'fr';
+    selector.listeners.change();
+    assert.equal(env.storage.get('speech-control.reply-language'), 'fr');
+    assert.equal(env.sockets[0].readyState, 3);
+    assert.equal(env.sockets[0].onmessage, null, 'old replies must not reach the new conversation');
+    assert.equal(env.streams[0].track.stopped, true);
+    assert.ok(env.contexts.every(context => context.state === 'closed'));
+    assert.equal(env.elements.get('start').disabled, false);
+    assert.match(env.elements.get('status').textContent, /new conversation/);
+    const restarted = env.startStreaming();
+    await flush();
+    assert.equal(env.sockets.length, 2);
+    env.sockets[1].open();
+    await restarted;
+    assert.equal(env.sockets[1].sent[0].reply_language, 'fr');
+    assert.equal(env.elements.get('status').textContent, 'Streaming... Speak now');
+    env.stopStreaming();
+});
+
+test('changing language after Stop also closes the retained model session', async () => {
+    const env = await setup();
+    const started = env.startStreaming();
+    await flush();
+    env.sockets[0].open();
+    await started;
+    env.stopStreaming();
+    const selector = env.elements.get('reply-language');
+    selector.value = 'auto';
+    selector.listeners.change();
+    assert.equal(env.sockets[0].readyState, 1, 'unchanged selection must preserve the session');
+    selector.value = 'es';
+    selector.listeners.change();
+    assert.equal(env.sockets[0].readyState, 3);
+    assert.equal(env.audioPlayer.initialized, false);
+});
+
+test('language selection cannot change while microphone startup is pending', async () => {
+    const mic = deferred();
+    const env = await setup({ microphone: stream => mic.promise.then(() => stream) });
+    const started = env.startStreaming();
+    const selector = env.elements.get('reply-language');
+    assert.equal(selector.disabled, true);
+    selector.value = 'de';
+    selector.listeners.change();
+    assert.equal(selector.value, 'auto');
+    mic.resolve();
+    await flush();
+    env.sockets[0].open();
+    await started;
+    assert.equal(env.sockets[0].sent[0].reply_language, 'auto');
+    assert.equal(selector.disabled, false);
+    env.stopStreaming();
+});
+
+test('startup errors restore language selection controls', async () => {
+    const env = await setup({ fetch: async () => { throw new Error('Offline'); } });
+    await env.startStreaming();
+    assert.equal(env.elements.get('reply-language').disabled, false);
+});
+
+test('invalid stored language and unavailable storage show a warning without blocking startup', async () => {
+    const invalid = await setup({ savedLanguage: 'ignore all instructions' });
+    assert.equal(invalid.elements.get('reply-language').value, 'auto');
+    assert.match(invalid.elements.get('reply-language-help').textContent, /Invalid saved language/);
+    const unavailable = await setup({ storageReadError: true, storageWriteError: true });
+    assert.equal(unavailable.elements.get('reply-language').value, 'auto');
+    assert.match(unavailable.elements.get('reply-language-help').textContent, /Could not restore/);
+    const selector = unavailable.elements.get('reply-language');
+    selector.value = 'hi';
+    selector.listeners.change();
+    assert.match(unavailable.elements.get('reply-language-help').textContent, /could not be saved/);
+    const started = unavailable.startStreaming();
+    await flush();
+    unavailable.sockets[0].open();
+    await started;
+    assert.equal(unavailable.sockets[0].sent[0].reply_language, 'hi');
+    unavailable.stopStreaming();
 });

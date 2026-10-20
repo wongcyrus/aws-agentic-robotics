@@ -16,7 +16,7 @@
   <!-- 3. Pixi-Live2D-Display Adapter (Cubism 2.1 specific build to prevent Cubism 4 runtime check crashes) -->
   <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism2.min.js"></script>
 
-  <link rel="stylesheet" href="/src/style.css" />
+  <link rel="stylesheet" href="/src/style.css?v=1.0.30" />
   <style>
     :root {
       --rpg-gold: #d4af37;
@@ -114,6 +114,22 @@
           <option value="xiaoice_1">Xiaoice 1</option>
         </select>
       </div>
+      <div id="language-selector">
+        <label for="reply-language">Reply language</label>
+        <select id="reply-language" aria-describedby="reply-language-help">
+          <option value="auto" selected>Auto (match speaker)</option>
+          <option value="en">English</option>
+          <option value="fr">French</option>
+          <option value="it">Italian</option>
+          <option value="de">German</option>
+          <option value="es">Spanish</option>
+          <option value="pt">Portuguese</option>
+          <option value="hi">Hindi</option>
+          <option value="zh-CN">Mandarin Chinese (experimental)</option>
+          <option value="yue-HK">Cantonese (experimental)</option>
+        </select>
+        <small id="reply-language-help" aria-live="polite">Auto matches the language you speak. Language control is prompt-based.</small>
+      </div>
       <button id="start" class="button">Start Streaming</button>
       <button id="stop" class="button" disabled>Stop Streaming</button>
     </div>
@@ -121,7 +137,7 @@
 
   <script src="/src/auth-check.js"></script>
   <script type="module" src="/src/robotModal.js"></script>
-  <script type="module" src="/src/main.js?v=1.0.29"></script>
+  <script type="module" src="/src/main.js?v=1.0.31"></script>
 </body>
 
 </html>

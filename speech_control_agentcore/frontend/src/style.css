@@ -494,6 +494,39 @@ body {
   border-radius: 12px;
 }
 
+#language-selector {
+  display: flex;
+  flex: 1 1 250px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  max-width: 320px;
+}
+
+#language-selector label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+#reply-language {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--rpg-border);
+  border-radius: 8px;
+  background: #1e293b;
+  color: white;
+  font: inherit;
+}
+
+#reply-language:disabled {
+  opacity: 0.5;
+}
+
+#reply-language-help {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
 button,
 .button {
   font-family: 'Outfit', sans-serif;

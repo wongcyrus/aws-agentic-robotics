@@ -327,7 +327,9 @@ class NativeSocketEmulator {
         } else if (event === 'robot') {
             payload = {
                 type: 'robot',
-                robots: data
+                robots: data,
+                reply_language: replyLanguage,
+                voice_id: getQueryParams().voice_id || 'tiffany'
             };
         } else if (event === 'stopAudio') {
             payload = {
@@ -369,6 +371,37 @@ const stopButton = document.getElementById('stop');
 const statusElement = document.getElementById('status');
 const chatContainer = document.getElementById('chat-container');
 const robotSelect = document.getElementById('robot-select');
+const replyLanguageSelect = document.getElementById('reply-language');
+const replyLanguageHelp = document.getElementById('reply-language-help');
+const replyLanguageStorageKey = 'speech-control.reply-language';
+let replyLanguage = 'auto';
+let languageStorageWarning = '';
+
+try {
+    const savedLanguage = localStorage.getItem(replyLanguageStorageKey);
+    if (savedLanguage) {
+        if (Array.from(replyLanguageSelect.options).some(option => option.value === savedLanguage)) {
+            replyLanguage = savedLanguage;
+        } else {
+            console.warn("Invalid saved reply language; using Auto.");
+            languageStorageWarning = 'Invalid saved language; Auto selected.';
+        }
+    }
+} catch (error) {
+    console.warn("Could not restore reply language:", error);
+    languageStorageWarning = 'Could not restore the saved language; Auto selected.';
+}
+replyLanguageSelect.value = replyLanguage;
+updateReplyLanguageHelp();
+
+function updateReplyLanguageHelp() {
+    const hint = ['zh-CN', 'yue-HK'].includes(replyLanguage) ?
+        'Experimental: Sonic does not officially support Mandarin or Cantonese; speech may be unreliable.' :
+        replyLanguage === 'auto' ?
+            'Auto matches the language you speak, not your browser language. Language control is prompt-based.' :
+            'Replies use the selected language. Language control is prompt-based.';
+    replyLanguageHelp.textContent = [hint, languageStorageWarning].filter(Boolean).join(' ');
+}
 
 // Chat history management
 let chat = { history: [] };
@@ -572,6 +605,7 @@ async function startStreaming() {
 
     try {
         startButton.disabled = true;
+        replyLanguageSelect.disabled = true;
         await initAudio();
 
         // First, make sure the session is initialized
@@ -671,6 +705,7 @@ async function startStreaming() {
         statusElement.className = "error";
     } finally {
         isStarting = false;
+        replyLanguageSelect.disabled = false;
     }
 }
 
@@ -1234,6 +1269,51 @@ socket.on('error', (error) => {
 // Button event listeners
 startButton.addEventListener('click', startStreaming);
 stopButton.addEventListener('click', stopStreaming);
+replyLanguageSelect.addEventListener('change', () => {
+    if (isStarting) {
+        replyLanguageSelect.value = replyLanguage;
+        return;
+    }
+    if (replyLanguageSelect.value === replyLanguage) return;
+    replyLanguage = replyLanguageSelect.value;
+    languageStorageWarning = '';
+    try {
+        localStorage.setItem(replyLanguageStorageKey, replyLanguage);
+    } catch (error) {
+        console.warn("Could not save reply language:", error);
+        languageStorageWarning = 'This selection could not be saved for your next visit.';
+    }
+    updateReplyLanguageHelp();
+
+    stopSyncLoop();
+    if (isStreaming) {
+        stopStreaming();
+    } else {
+        releaseAudio();
+    }
+    if (socket.ws) {
+        socket.ws.onopen = null;
+        socket.ws.onclose = null;
+        socket.ws.onerror = null;
+        socket.ws.onmessage = null;
+        socket.ws.close(1000, 'Reply language changed');
+        socket.ws = null;
+    }
+    socket.connected = false;
+    socket.lastError = null;
+    sessionInitialized = false;
+    hasStartedSession = false;
+    totalSamplesReceived = 0;
+    currentFullText = '';
+    assistantTurnEnded = false;
+    hideUserThinkingIndicator();
+    hideAssistantThinkingIndicator();
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    statusElement.textContent = 'Reply language changed. Click Start Streaming to begin a new conversation.';
+    statusElement.className = 'ready';
+    setSystemDialogue(statusElement.textContent);
+});
 
 // Initialize the app when the page loads
 document.addEventListener('DOMContentLoaded', async () => {

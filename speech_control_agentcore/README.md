@@ -50,6 +50,36 @@ This cockpit features several advanced, state-of-the-art interactive systems:
 
 ## 🚀 Running Locally
 
+### Reply language
+
+The **Reply language** selector defaults to **Auto (match speaker)**. Auto asks
+Sonic to respond in the language of the user's latest spoken turn, including
+confirmations and clarification questions; it does not use the browser locale.
+Fixed selections ask Sonic to keep the selected reply language even when the
+user or tool results use another language. The choice is remembered in this
+browser under `speech-control.reply-language`.
+
+The frontend sends `reply_language` with the existing initial `robot`
+configuration message, before microphone frames are streamed. Custom URL query
+parameters are not forwarded to the app by AgentCore, so the backend reads this
+message before creating the agent and appends the selected language policy to
+the system prompt. The policy is retained when devices change. Older clients
+that omit the field use Auto. Changing language ends the current session
+and releases microphone/playback resources; tap **Start Streaming** to apply
+the new policy in a fresh conversation. Selection is disabled during startup
+to prevent a session from using a stale language choice.
+
+Language control is prompt-based, not a hard API guarantee. Nova 2.5 Sonic
+officially supports English, French, Italian, German, Spanish, Portuguese, and
+Hindi. The default `tiffany` voice supports all seven; `voice_id` is not itself
+a language lock. Mandarin Chinese and Cantonese are exposed as **experimental**
+prompt choices with a visible warning, not as officially supported speech
+languages. Auto does not make unsupported languages reliable.
+
+Sources: [Sonic system prompts](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-system-prompts.html),
+[language support](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html),
+and the [Nova 2.5 Sonic service card](https://docs.aws.amazon.com/ai/responsible-ai/nova-2-5-sonic/overview.html).
+
 ### iOS Safari startup
 
 Tap **Start Streaming** to initialize microphone capture and speaker playback
