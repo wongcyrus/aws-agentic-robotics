@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -28,7 +29,14 @@ class EndpointFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 # Env Variables
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "moonshotai.kimi-k2.5")
+COMMENTARY_MODELS = json.loads(os.environ.get(
+    "COMMENTARY_MODELS",
+    json.dumps([{"id": BEDROCK_MODEL_ID, "supportsImages": BEDROCK_MODEL_ID in {
+        "moonshotai.kimi-k2.5", "global.moonshotai.kimi-k3",
+    }}]),
+))
+COMMENTARY_MAX_TOKENS = int(os.environ.get("COMMENTARY_MAX_TOKENS", "1600"))
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION", "us-east-1")
 
 # Helper to load system prompts
@@ -93,6 +101,11 @@ async def invoke_agent(request: Request):
     """Handles commentary requests from the AWS serverless Lambda gateway."""
     try:
         body = await request.json()
+        model_id = body.get("modelId", BEDROCK_MODEL_ID)
+        selected_model = next((model for model in COMMENTARY_MODELS if model["id"] == model_id), None)
+        if selected_model is None:
+            logger.warning("Rejected unsupported commentary modelId")
+            return JSONResponse(status_code=400, content={"error": "Unsupported commentary modelId"})
         prompt_text = body.get("prompt", "")
         session_id = body.get("session_id", "main")
         
@@ -139,8 +152,9 @@ async def invoke_agent(request: Request):
 
         system_prompt = load_system_prompt()
         model = BedrockModel(
-            model_id=BEDROCK_MODEL_ID,
-            region_name=AWS_BEDROCK_REGION
+            model_id=selected_model["id"],
+            region_name=AWS_BEDROCK_REGION,
+            max_tokens=COMMENTARY_MAX_TOKENS,
         )
         agent = Agent(
             model=model,
@@ -221,6 +235,10 @@ async def invoke_agent(request: Request):
             image_format_p2 = "jpeg"
 
         multimodal_parts = []
+
+        if not selected_model["supportsImages"]:
+            image_b64_p1 = image_b64_p2 = ""
+            logger.info("Text-only commentary model=%s; images omitted", selected_model["id"])
 
         if image_b64_p1:
             import base64

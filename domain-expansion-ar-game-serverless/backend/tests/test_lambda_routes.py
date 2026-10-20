@@ -210,6 +210,45 @@ def test_local_tts_reuses_supplied_commentary_without_model_call(monkeypatch):
     assert body["audioUrl"] == "https://audio"
 
 
+@pytest.mark.parametrize("path", ["/api/live-status", "/api/battle-result"])
+@pytest.mark.parametrize("model_id", ["zai.glm-4.7-flash", "zai.glm-5", "deepseek.v3.2"])
+def test_text_only_model_never_fetches_snapshots(monkeypatch, path, model_id):
+    calls = []
+    monkeypatch.setattr(commentary.boto3, "client",
+                        lambda *args, **kwargs: pytest.fail("No image fetch should occur"))
+    monkeypatch.setattr(commentary, "generate_ai_commentary",
+                        lambda **kwargs: calls.append(kwargs) or "Fight!")
+    monkeypatch.setattr(lambda_function, "invoke_agentcore_gateway_tool", lambda **kwargs: None)
+    response = lambda_function.handle_http({
+        "path": path, "httpMethod": "POST",
+        "body": json.dumps({"modelId": model_id, "agent_type": "strands_local",
+                            "agentImagePolicy": "always", "isReset": True}),
+    })
+    assert response["statusCode"] == 200
+    assert _body(response)["debugImageContext"]["shouldAttachImage"] is False
+    assert calls[0]["model_id"] == model_id
+    assert calls[0]["image_bytes_p1"] is None
+    assert calls[0]["image_bytes_p2"] is None
+    assert calls[0]["image_base64_p1"] == ""
+    assert calls[0]["image_base64_p2"] == ""
+
+
+@pytest.mark.parametrize("body", [
+    {"modelId": "not-allowed"},
+    {"modelId": None},
+    {"modelId": [], "agentImagePolicy": "always"},
+    {"modelId": "moonshotai.kimi-k2.5", "agent_type": "openclaw"},
+])
+def test_invalid_model_request_returns_400_without_generation(monkeypatch, body):
+    monkeypatch.setattr(commentary, "generate_ai_commentary",
+                        lambda **kwargs: pytest.fail("Invalid request must not generate commentary"))
+    response = lambda_function.handle_http({
+        "path": "/api/live-status", "httpMethod": "POST", "body": json.dumps(body),
+    })
+    assert response["statusCode"] == 400
+    assert "error" in _body(response)
+
+
 def test_openclaw_commentary_skips_duplicate_gateway_delivery(monkeypatch):
     gateway_calls = []
     monkeypatch.setattr(commentary, "translate_detail", lambda text: text)

@@ -11,3 +11,6 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
 os.environ.setdefault("AWS_SESSION_TOKEN", "test")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+os.environ.setdefault("COMMENTARY_MODELS", (
+    PROJECT_ROOT.parent / "domain-expansion-ar-game" / "commentary-models.json"
+).read_text())

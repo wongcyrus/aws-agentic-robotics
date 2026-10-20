@@ -413,10 +413,20 @@ def handle_http(event):
 
     # Endpoint: /api/live-status
     elif path in ["/api/live-status", "/api/battle-result"] and method == "POST":
-        from commentary import translate_detail, generate_ai_commentary
+        from commentary import translate_detail, generate_ai_commentary, resolve_commentary_model
         from commentary_tts import synthesize_commentary_audio
         
         live_request = LiveStatusRequest.from_body(body, path, DEFAULT_AGENT_TYPE)
+        try:
+            if "modelId" in body and not isinstance(body["modelId"], str):
+                raise ValueError("Unsupported commentary modelId")
+            if live_request.agent_engine == "openclaw" and "modelId" in body:
+                raise ValueError("OpenClaw manages its own model; select a Bedrock engine to use modelId")
+            selected_model = resolve_commentary_model(body.get("modelId"))
+        except ValueError as error:
+            logger.warning("Invalid commentary model selection: %s", error)
+            return {"statusCode": 400, "headers": JSON_HEADERS,
+                    "body": json.dumps({"error": str(error)})}
         session_id = live_request.session_id
         event_type = live_request.event_type
         agent_image_policy = live_request.agent_image_policy
@@ -446,7 +456,9 @@ def handle_http(event):
         image_base64_p2 = ""
         
         # Decide if we should attach image based on policy
-        should_attach_image = live_request.should_attach_image
+        should_attach_image = live_request.should_attach_image and (
+            live_request.agent_engine == "openclaw" or selected_model["supportsImages"]
+        )
 
         if should_attach_image:
             try:
@@ -501,7 +513,8 @@ def handle_http(event):
                 image_format_p2=image_format_p2,
                 image_base64_p1=image_base64_p1,
                 image_base64_p2=image_base64_p2,
-                language=commentary_language
+                language=commentary_language,
+                model_id=None if agent_engine == "openclaw" else selected_model["id"],
             )
 
         # OpenClaw already handles its own delivery; avoid extending the synchronous REST request.

@@ -14,7 +14,13 @@ DEFAULT_AGENT_TYPE = os.environ.get("AGENT_TYPE", "agentcore_runtime")
 OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
 OPENCLAW_AGENT_ID = os.environ.get("OPENCLAW_AGENT_ID", "main")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.moonshotai.kimi-k3")
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "moonshotai.kimi-k2.5")
+COMMENTARY_MODELS = json.loads(os.environ.get(
+    "COMMENTARY_MODELS",
+    json.dumps([{"id": BEDROCK_MODEL_ID, "supportsImages": BEDROCK_MODEL_ID in {
+        "moonshotai.kimi-k2.5", "global.moonshotai.kimi-k3",
+    }}]),
+))
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "us-east-1")
 COMMENTARY_MAX_TOKENS = int(
     os.environ.get(
@@ -28,6 +34,14 @@ OPENCLAW_USER_FILES_BUCKET = os.environ.get("OPENCLAW_USER_FILES_BUCKET", "")
 AGENTCORE_READ_TIMEOUT_SECONDS = int(
     os.environ.get("AGENTCORE_READ_TIMEOUT_SECONDS", "50")
 )
+
+
+def resolve_commentary_model(model_id: str | None = None) -> dict:
+    selected_id = BEDROCK_MODEL_ID if model_id is None else model_id
+    for model in COMMENTARY_MODELS:
+        if model["id"] == selected_id:
+            return model
+    raise ValueError("Unsupported commentary modelId")
 
 
 def _build_openclaw_content_block(
@@ -276,8 +290,12 @@ def generate_direct_bedrock_commentary(
     image_bytes_p2: bytes = None,
     image_format_p2: str = "jpeg",
     language: str = "zh-HK",
+    model_id: str | None = None,
 ) -> str:
     """Generate commentary through the explicitly selected direct Bedrock engine."""
+    selected_model = resolve_commentary_model(model_id)
+    if not selected_model["supportsImages"]:
+        image_bytes_p1 = image_bytes_p2 = None
     if image_format_p1 == "jpg":
         image_format_p1 = "jpeg"
     if image_format_p2 == "jpg":
@@ -316,7 +334,7 @@ def generate_direct_bedrock_commentary(
         messages = [{"role": "user", "content": content_list}]
 
         response = bedrock_client.converse(
-            modelId=BEDROCK_MODEL_ID,
+            modelId=selected_model["id"],
             messages=messages,
             system=[{"text": system_prompt}],
             inferenceConfig={"maxTokens": COMMENTARY_MAX_TOKENS},
@@ -370,8 +388,18 @@ def generate_ai_commentary(
     image_base64_p1: str = "",
     image_base64_p2: str = "",
     language: str = "zh-HK",
+    model_id: str | None = None,
 ) -> str:
     """Central manager to generate AI game commentary using the selected engine."""
+    if agent_engine == "openclaw" and model_id is not None:
+        raise ValueError("OpenClaw manages its own model; select a Bedrock engine to use modelId")
+    selected_model = resolve_commentary_model(model_id)
+    if agent_engine != "openclaw" and not selected_model["supportsImages"]:
+        image_bytes_p1 = image_bytes_p2 = None
+        image_base64_p1 = image_base64_p2 = ""
+    logger.info("Commentary engine=%s model=%s images=%s", agent_engine,
+                "external" if agent_engine == "openclaw" else selected_model["id"],
+                bool(image_bytes_p1 or image_bytes_p2 or image_base64_p1 or image_base64_p2))
     if image_format_p1 == "jpg":
         image_format_p1 = "jpeg"
     if image_format_p2 == "jpg":
@@ -385,6 +413,7 @@ def generate_ai_commentary(
             image_bytes_p2,
             image_format_p2,
             language=language,
+            model_id=selected_model["id"],
         )
 
     # Build base64 if missing but bytes are present
@@ -405,7 +434,8 @@ def generate_ai_commentary(
 
             system_prompt = load_system_prompt(language=language)
             model = BedrockModel(
-                model_id=BEDROCK_MODEL_ID, region_name=BEDROCK_REGION
+                model_id=selected_model["id"], region_name=BEDROCK_REGION,
+                max_tokens=COMMENTARY_MAX_TOKENS,
             )
             agent = Agent(model=model, system_prompt=system_prompt)
 
@@ -542,6 +572,7 @@ def generate_ai_commentary(
                 payload_dict = {
                     "prompt": content_block,
                     "session_id": compliant_session_id,
+                    "modelId": selected_model["id"],
                 }
                 if image_base64_p1:
                     payload_dict["image"] = image_base64_p1

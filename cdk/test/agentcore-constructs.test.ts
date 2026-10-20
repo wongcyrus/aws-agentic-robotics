@@ -274,7 +274,9 @@ describe("AgentCore-backed constructs", () => {
       EnvironmentVariables: {
         IsInCloud: "yes",
         AWS_BEDROCK_REGION: "us-east-1",
-        BEDROCK_MODEL_ID: "global.moonshotai.kimi-k3",
+        BEDROCK_MODEL_ID: "moonshotai.kimi-k2.5",
+        COMMENTARY_MODELS: Match.stringLikeRegexp("deepseek.v3.2"),
+        COMMENTARY_MAX_TOKENS: "1600",
       },
       LifecycleConfiguration: {
         IdleRuntimeSessionTimeout: 120,
@@ -293,6 +295,8 @@ describe("AgentCore-backed constructs", () => {
           ROBOT_API_ENDPOINT: "https://simulator.example.test",
           McpServerGatewayUrl: "https://gateway.example.test",
           DEFAULT_SESSION_KEY: "mcpserver",
+          BEDROCK_MODEL_ID: "moonshotai.kimi-k2.5",
+          COMMENTARY_MODELS: Match.stringLikeRegexp("zai.glm-4.7-flash"),
         }),
       },
     });
@@ -399,6 +403,17 @@ describe("AgentCore-backed constructs", () => {
     const policies = JSON.stringify(template.findResources("AWS::IAM::Policy"));
     expect(policies).toContain("bedrock-agentcore:InvokeAgentRuntime");
     expect(policies).toContain("moonshotai.kimi-k3");
+    expect(policies).toContain("moonshotai.kimi-k2.5");
+    expect(policies).toContain("deepseek.v3.2");
+    expect(policies).toContain("zai.glm-4.7-flash");
+    expect(policies).toContain("zai.glm-5");
+    const bedrockStatements = Object.values(template.findResources("AWS::IAM::Policy"))
+      .flatMap(({ Properties }) => Properties.PolicyDocument.Statement)
+      .filter((statement) => [statement.Action].flat().includes("bedrock:InvokeModel"));
+    expect(bedrockStatements).toHaveLength(2);
+    bedrockStatements.forEach((statement) => {
+      expect([statement.Resource].flat()).not.toContain("*");
+    });
     expect(policies).toContain("cloudfront:GetInvalidation");
     expect(policies).toContain("execute-api:ManageConnections");
   });

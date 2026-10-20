@@ -14,6 +14,19 @@ Battle mode does not implement the legacy `BroadcastChannel` cross-tab coordinat
 players and viewers connect to a locally hosted or deployed WebSocket coordinator
 using the same protocol as production.
 
+Commentary accepts an optional `modelId` for `strands_local`,
+`agentcore_runtime`, and `local_direct`, defaulting to `moonshotai.kimi-k2.5`.
+CDK sets `COMMENTARY_MODELS` from the game's `commentary-models.json` catalog
+on both the Lambda and AgentCore runtime, with matching model-scoped IAM grants.
+Without that environment variable, each service permits only its configured
+`BEDROCK_MODEL_ID`. Unknown model IDs return HTTP 400. OpenClaw owns its model
+configuration and rejects Bedrock model overrides.
+
+GLM and DeepSeek commentary skips S3 snapshot fetching and never includes images
+in inference, regardless of the requested image policy. The owned AgentCore
+runtime also strips supplied images independently. Direct Bedrock, Strands Local,
+and AgentCore Runtime use an explicit `COMMENTARY_MAX_TOKENS` budget (1600 in CDK).
+
 Run the backend tests from the repository root:
 
 ```bash

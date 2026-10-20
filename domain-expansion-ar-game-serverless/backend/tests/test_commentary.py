@@ -126,6 +126,92 @@ def test_local_direct_bypasses_agent_runtimes(monkeypatch):
     assert commentary.generate_ai_commentary("local_direct", "fight") == "direct commentary"
 
 
+def test_default_commentary_model_is_kimi_25():
+    assert commentary.resolve_commentary_model()["id"] == "moonshotai.kimi-k2.5"
+
+
+@pytest.mark.parametrize("model", commentary.COMMENTARY_MODELS, ids=lambda model: model["id"])
+def test_direct_model_selection_and_image_capability(monkeypatch, model):
+    calls = []
+
+    def converse(**kwargs):
+        calls.append(kwargs)
+        return {"output": {"message": {"content": [{"text": "answer"}]}}}
+
+    monkeypatch.setattr(commentary.boto3, "client",
+                        lambda *args, **kwargs: SimpleNamespace(converse=converse))
+    commentary.generate_direct_bedrock_commentary(
+        "fight", b"one", "jpeg", b"two", "png", model_id=model["id"]
+    )
+    request = calls[0]
+    assert request["modelId"] == model["id"]
+    assert request["inferenceConfig"]["maxTokens"] == commentary.COMMENTARY_MAX_TOKENS
+    images = [part for part in request["messages"][0]["content"] if "image" in part]
+    assert len(images) == (2 if model["supportsImages"] else 0)
+
+
+@pytest.mark.parametrize("model", commentary.COMMENTARY_MODELS, ids=lambda model: model["id"])
+def test_agentcore_model_selection_filters_bytes_and_base64(monkeypatch, model):
+    calls = []
+
+    def invoke(**kwargs):
+        calls.append(json.loads(kwargs["payload"]))
+        return {"response": b'{"response":"answer"}'}
+
+    monkeypatch.setenv("AGENTCORE_RUNTIME_ARN", "arn:runtime")
+    monkeypatch.setattr(commentary.boto3, "client",
+                        lambda *args, **kwargs: SimpleNamespace(invoke_agent_runtime=invoke))
+    commentary.generate_ai_commentary(
+        "agentcore_runtime", "fight", model_id=model["id"],
+        image_bytes_p1=b"one", image_base64_p2="encoded-two",
+    )
+    assert calls[0]["modelId"] == model["id"]
+    assert ("image" in calls[0]) is model["supportsImages"]
+    assert ("image_p2" in calls[0]) is model["supportsImages"]
+
+
+@pytest.mark.parametrize("model", commentary.COMMENTARY_MODELS, ids=lambda model: model["id"])
+def test_strands_model_selection_token_budget_and_images(monkeypatch, model):
+    models_created, invocations = [], []
+
+    class Agent:
+        def __init__(self, **kwargs):
+            pass
+
+        async def invoke_async(self, message):
+            invocations.append(message)
+            return "answer"
+
+    strands = ModuleType("strands")
+    strands.Agent = Agent
+    models = ModuleType("strands.models")
+    models.BedrockModel = lambda **kwargs: models_created.append(kwargs)
+    monkeypatch.setitem(sys.modules, "strands", strands)
+    monkeypatch.setitem(sys.modules, "strands.models", models)
+    commentary.generate_ai_commentary(
+        "strands_local", "fight", model_id=model["id"],
+        image_bytes_p1=b"one", image_bytes_p2=b"two",
+    )
+    assert models_created[0]["model_id"] == model["id"]
+    assert models_created[0]["max_tokens"] == commentary.COMMENTARY_MAX_TOKENS
+    assert isinstance(invocations[0], list) is model["supportsImages"]
+    if not model["supportsImages"]:
+        assert invocations == ["fight"]
+
+
+@pytest.mark.parametrize("model_id", ["", "not-a-model", [], {"id": "deepseek.v3.2"}])
+def test_invalid_model_is_rejected_before_aws_call(monkeypatch, model_id):
+    monkeypatch.setattr(commentary.boto3, "client",
+                        lambda *args, **kwargs: pytest.fail("AWS must not be called"))
+    with pytest.raises(ValueError, match="Unsupported commentary modelId"):
+        commentary.generate_ai_commentary("local_direct", "fight", model_id=model_id)
+
+
+def test_openclaw_rejects_bedrock_model_override():
+    with pytest.raises(ValueError, match="OpenClaw manages its own model"):
+        commentary.generate_ai_commentary("openclaw", "fight", model_id="moonshotai.kimi-k2.5")
+
+
 def test_resolve_agentcore_identity_keeps_actor_stable_and_isolates_sessions(monkeypatch):
     monkeypatch.setenv("AGENTCORE_ACTOR_ID", "telegram:user")
     first = commentary.resolve_agentcore_identity("one", "arn")

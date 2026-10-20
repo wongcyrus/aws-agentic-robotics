@@ -153,3 +153,44 @@ def test_invalid_base64_returns_500(client):
     response = client.post("/invoke", json={"prompt": "Fight!", "image": "a"})
     assert response.status_code == 500
     assert "error" in response.json()
+
+
+@pytest.mark.parametrize("model", commentator_agent.COMMENTARY_MODELS, ids=lambda model: model["id"])
+def test_model_selection_and_image_capability(client, model):
+    encoded = base64.b64encode(b"image").decode()
+    response = client.post("/invoke", json={
+        "prompt": f"Fight!<p1_webcam_base64_jpeg>{encoded}</p1_webcam_base64_jpeg>",
+        "modelId": model["id"],
+        "image_p2": encoded,
+    })
+    assert response.status_code == 200
+    agent = FakeAgent.instances[-1]
+    assert agent.kwargs["model"].kwargs["model_id"] == model["id"]
+    assert agent.kwargs["model"].kwargs["max_tokens"] == commentator_agent.COMMENTARY_MAX_TOKENS
+    assert isinstance(agent.invocations[0], list) is model["supportsImages"]
+    if not model["supportsImages"]:
+        assert agent.invocations == ["Fight!"]
+
+
+@pytest.mark.parametrize("model_id", ["zai.glm-4.7-flash", "zai.glm-5", "deepseek.v3.2"])
+def test_text_only_model_does_not_decode_images_from_any_source(client, model_id):
+    response = client.post("/invoke", json={
+        "modelId": model_id,
+        "prompt": "Fight!<p1_webcam_base64_jpeg>a</p1_webcam_base64_jpeg>",
+        "image_p2": "a",
+        "message": [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,a"}}],
+    })
+    assert response.status_code == 200
+    assert FakeAgent.instances[-1].invocations == ["Fight!"]
+
+
+@pytest.mark.parametrize("model_id", ["", None, "unsupported", ["deepseek.v3.2"]])
+def test_invalid_model_is_rejected_before_agent_creation(client, model_id):
+    response = client.post("/invoke", json={"prompt": "Fight!", "modelId": model_id})
+    assert response.status_code == 400
+    assert FakeAgent.instances == []
+
+
+def test_default_model_is_kimi_25(client):
+    client.post("/invoke", json={"prompt": "Fight!"})
+    assert FakeAgent.instances[-1].kwargs["model"].kwargs["model_id"] == "moonshotai.kimi-k2.5"

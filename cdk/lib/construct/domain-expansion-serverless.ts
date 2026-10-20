@@ -10,6 +10,7 @@ import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import * as path from "path";
+import { readFileSync } from "fs";
 import { PythonFunction } from "@aws-cdk/aws-lambda-python-alpha";
 import { Platform } from "aws-cdk-lib/aws-ecr-assets";
 import { UserPool, UserPoolClient } from "aws-cdk-lib/aws-cognito";
@@ -26,7 +27,9 @@ import {
   createAgentCoreRuntimeObservability,
 } from "./agentcore-observability";
 
-const KIMI_MODEL_ID = "global.moonshotai.kimi-k3";
+const COMMENTARY_MODELS: { id: string; label: string; supportsImages: boolean }[] =
+  JSON.parse(readFileSync(path.join(__dirname, "../../../domain-expansion-ar-game/commentary-models.json"), "utf8"));
+const DEFAULT_MODEL_ID = COMMENTARY_MODELS[0].id;
 
 export interface DomainExpansionServerlessConstructProps {
   readonly userPool: UserPool;
@@ -49,6 +52,24 @@ export class DomainExpansionServerlessConstruct extends Construct {
   ) {
     super(scope, id);
 
+    const modelResources = COMMENTARY_MODELS.flatMap(({ id: modelId }) => {
+      const crossRegion = /^(global|us|eu|apac)\./.test(modelId);
+      const foundationModelArn = Stack.of(this).formatArn({
+        service: "bedrock",
+        region: crossRegion ? "*" : "us-east-1",
+        account: "",
+        resource: "foundation-model",
+        resourceName: modelId.replace(/^(global|us|eu|apac)\./, ""),
+      });
+      return crossRegion ? [
+        Stack.of(this).formatArn({
+          service: "bedrock",
+          resource: "inference-profile",
+          resourceName: modelId,
+        }),
+        foundationModelArn,
+      ] : [foundationModelArn];
+    });
     const openClawRuntimeArn = ssm.StringParameter.valueForStringParameter(
       this,
       "/openclaw/agentcore/runtime-arn-dev"
@@ -81,7 +102,9 @@ export class DomainExpansionServerlessConstruct extends Construct {
       environmentVariables: {
         IsInCloud: "yes",
         AWS_BEDROCK_REGION: "us-east-1",
-        BEDROCK_MODEL_ID: KIMI_MODEL_ID,
+        BEDROCK_MODEL_ID: DEFAULT_MODEL_ID,
+        COMMENTARY_MODELS: JSON.stringify(COMMENTARY_MODELS),
+        COMMENTARY_MAX_TOKENS: "1600",
       },
     });
     this.runtimeArn = runtime.agentRuntimeArn;
@@ -97,14 +120,7 @@ export class DomainExpansionServerlessConstruct extends Construct {
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
         ],
-        resources: [
-          Stack.of(this).formatArn({
-            service: "bedrock",
-            resource: "inference-profile",
-            resourceName: KIMI_MODEL_ID,
-          }),
-          "arn:aws:bedrock:*::foundation-model/moonshotai.kimi-k3",
-        ],
+        resources: modelResources,
       })
     );
 
@@ -200,7 +216,8 @@ export class DomainExpansionServerlessConstruct extends Construct {
         OPENCLAW_SESSION_ID: "telegram:default",
         OPENCLAW_AGENT_ID: "main",
         OPENCLAW_USER_FILES_BUCKET: openClawUserFilesBucketName,
-        BEDROCK_MODEL_ID: KIMI_MODEL_ID,
+        BEDROCK_MODEL_ID: DEFAULT_MODEL_ID,
+        COMMENTARY_MODELS: JSON.stringify(COMMENTARY_MODELS),
         COMMENTARY_MAX_TOKENS: "1600",
         AGENTCORE_READ_TIMEOUT_SECONDS: "50",
         BEDROCK_REGION: Stack.of(this).region,
@@ -241,20 +258,18 @@ export class DomainExpansionServerlessConstruct extends Construct {
     );
     lambdaFunction.addToRolePolicy(
       new iam.PolicyStatement({
+        actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+        resources: modelResources,
+      })
+    );
+    lambdaFunction.addToRolePolicy(
+      new iam.PolicyStatement({
         actions: [
-          "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream",
           "bedrock-agentcore:InvokeAgentRuntime",
           "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
           "polly:SynthesizeSpeech",
         ],
         resources: [
-          Stack.of(this).formatArn({
-            service: "bedrock",
-            resource: "inference-profile",
-            resourceName: "global.moonshotai.kimi-k3",
-          }),
-          "arn:aws:bedrock:*::foundation-model/moonshotai.kimi-k3",
           runtime.agentRuntimeArn,
           `${runtime.agentRuntimeArn}/*`,
           openClawRuntimeArn,
